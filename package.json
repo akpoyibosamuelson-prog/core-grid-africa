@@ -1,1 +1,33 @@
-{"name":"core-grid-africa","version":"1.0.0","private":true,"scripts":{"dev":"next dev","build":"next build","lint":"next lint"},"dependencies":{"@supabase/ssr":"latest","@supabase/supabase-js":"latest","class-variance-authority":"latest","clsx":"latest","lucide-react":"latest","next":"latest","react":"latest","react-dom":"latest","recharts":"latest","tailwind-merge":"latest","zod":"latest"},"devDependencies":{"@types/node":"latest","@types/react":"latest","@types/react-dom":"latest","typescript":"latest","tailwindcss":"latest","postcss":"latest","autoprefixer":"latest"},"packageManager":"pnpm@10.4.1"}
+{
+  "name": "core-grid-africa",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@supabase/ssr": "latest",
+    "@supabase/supabase-js": "latest",
+    "class-variance-authority": "latest",
+    "clsx": "latest",
+    "lucide-react": "latest",
+    "next": "latest",
+    "react": "latest",
+    "react-dom": "latest",
+    "recharts": "latest",
+    "tailwind-merge": "latest",
+    "zod": "latest"
+  },
+  "devDependencies": {
+    "@types/node": "latest",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "typescript": "latest",
+    "tailwindcss": "latest",
+    "postcss": "latest",
+    "autoprefixer": "latest"
+  },
+  "packageManager": "pnpm@10.4.1"
+}
