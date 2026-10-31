@@ -1,0 +1,10 @@
+import Link from "next/link"
+import { createClient } from "@/lib/supabase/server"
+
+export default async function SettingsPage() {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  const { data: businesses } = user ? await supabase.from("businesses").select("id,name,category,currency,phone,email,address").eq("owner_id", user.id).limit(1) : { data: [] }
+  const business = businesses?.[0]
+  return <main className="min-h-screen bg-slate-50 text-slate-950"><div className="mx-auto max-w-4xl px-6 py-10"><div className="flex items-center justify-between"><div><Link href="/dashboard" className="text-sm font-bold text-cyan-700">← Back to dashboard</Link><h1 className="mt-5 text-4xl font-black">Business settings</h1><p className="mt-2 text-slate-500">Configure the workspace your team uses every day.</p></div><span className="rounded-full bg-cyan-100 px-4 py-2 text-sm font-bold text-cyan-800">{business?.currency ?? "NGN"}</span></div><div className="mt-10 rounded-3xl border border-slate-200 bg-white p-7 shadow-sm"><h2 className="text-xl font-black">Business profile</h2><div className="mt-6 grid gap-5 md:grid-cols-2">{[["Business name", business?.name ?? "Set up your business"],["Category", business?.category ?? "Not set"],["Phone", business?.phone ?? "Not set"],["Email", business?.email ?? user?.email ?? "Not set"],["Address", business?.address ?? "Not set"]].map(([label,value]) => <div key={label} className="rounded-2xl border border-slate-200 bg-slate-50 p-4"><p className="text-xs font-bold uppercase tracking-wider text-slate-500">{label}</p><p className="mt-2 font-semibold">{value}</p></div>)}</div><div className="mt-8 flex flex-wrap gap-3"><button className="rounded-xl bg-slate-950 px-5 py-3 text-sm font-bold text-white">Edit profile</button><button className="rounded-xl border border-slate-300 px-5 py-3 text-sm font-bold">Receipt settings</button><button className="rounded-xl border border-slate-300 px-5 py-3 text-sm font-bold">Team permissions</button></div></div></div></main>
+}
