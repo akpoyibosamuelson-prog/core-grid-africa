@@ -1,5 +1,75 @@
 import Link from 'next/link'
-import { ArrowRight, BarChart3, Boxes, Check, ChevronRight, ShieldCheck, Sparkles } from 'lucide-react'
-const stats=[['2,500+','Businesses served'],['₦18B+','Revenue tracked'],['99.9%','Platform uptime']]
-const features=[{icon:BarChart3,title:'Know your numbers',text:'Real-time sales, profit and expense visibility built for confident decisions.'},{icon:Boxes,title:'Run with precision',text:'Inventory, purchases and customers connected in one operational workspace.'},{icon:ShieldCheck,title:'Built for trust',text:'Secure, private business workspaces with granular access controls.'}]
-export default function Home(){return <main><header className="mx-auto flex max-w-7xl items-center justify-between px-6 py-5"><Link href="/" className="flex items-center gap-3"><span className="grid size-9 place-items-center rounded-xl bg-[#1463df] text-white font-bold">CG</span><span className="font-semibold tracking-tight">CORE GRID <span className="text-[#1463df]">AFRICA</span></span></Link><nav className="hidden items-center gap-8 text-sm text-slate-600 md:flex"><Link href="#product">BizPilot</Link><Link href="#features">Features</Link><Link href="#pricing">Pricing</Link><Link href="#contact">Contact</Link></nav><div className="flex items-center gap-3"><Link href="/auth/login" className="hidden px-4 py-2 text-sm font-semibold text-slate-700 sm:block">Log in</Link><Link href="/auth/register" className="rounded-lg bg-[#0b1d38] px-4 py-2.5 text-sm font-semibold text-white shadow-sm">Get started</Link></div></header><section className="relative overflow-hidden"><div className="mx-auto grid max-w-7xl items-center gap-14 px-6 pb-20 pt-16 lg:grid-cols-[1.05fr_.95fr] lg:pb-28 lg:pt-24"><div><div className="mb-6 inline-flex items-center gap-2 rounded-full border border-blue-100 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-[#1463df]"><Sparkles className="size-3.5"/> Built for Africa&apos;s next chapter</div><h1 className="max-w-3xl text-5xl font-bold leading-[1.04] tracking-[-0.04em] text-[#0b1d38] sm:text-6xl">The digital infrastructure that powers <span className="text-[#1463df]">African businesses.</span></h1><p className="mt-6 max-w-xl text-lg leading-8 text-slate-600">Core Grid Africa brings the systems, intelligence and control ambitious businesses need to move from surviving to scaling.</p><div className="mt-9 flex flex-wrap gap-3"><Link href="/auth/register" className="inline-flex items-center gap-2 rounded-lg bg-[#1463df] px-5 py-3.5 font-semibold text-white shadow-lg shadow-blue-200">Start with BizPilot <ArrowRight className="size-4"/></Link><Link href="#product" className="rounded-lg border border-slate-200 bg-white px-5 py-3.5 font-semibold text-[#0b1d38]">Explore the platform</Link></div></div><div className="relative"><div className="absolute -inset-5 rounded-[2rem] bg-blue-100/40 blur-2xl"/><div className="relative rounded-3xl border border-white bg-[#0b1d38] p-5 shadow-2xl shadow-blue-950/20"><div className="rounded-2xl bg-[#102b50] p-5"><div className="flex items-center justify-between"><div><p className="text-xs text-blue-200">Business overview</p><p className="mt-1 text-2xl font-bold text-white">Good morning, Ade</p></div><span className="rounded-full bg-cyan-400/15 px-3 py-1 text-xs text-cyan-200">Live data</span></div><div className="mt-6 grid grid-cols-2 gap-3"><div className="rounded-xl bg-white/10 p-4"><p className="text-xs text-blue-100">Total revenue</p><p className="mt-2 text-2xl font-bold text-white">₦8.42m</p><p className="mt-1 text-xs text-cyan-300">+18.4% this month</p></div><div className="rounded-xl bg-white/10 p-4"><p className="text-xs text-blue-100">Gross profit</p><p className="mt-2 text-2xl font-bold text-white">₦3.16m</p><p className="mt-1 text-xs text-cyan-300">+12.8% this month</p></div></div><div className="mt-4 h-28 rounded-xl bg-white/5 p-3"><div className="flex h-full items-end gap-2">{[35,48,40,65,55,78,70,94,82,100,88,96].map((h,i)=><div key={i} className="flex-1 rounded-t bg-gradient-to-t from-blue-500 to-cyan-300" style={{height:`${h}%`}}/>)}</div></div></div></div></div></div></section><section className="border-y border-slate-200 bg-white"><div className="mx-auto grid max-w-7xl grid-cols-1 divide-y divide-slate-200 px-6 py-7 sm:grid-cols-3 sm:divide-x sm:divide-y-0">{stats.map(([v,l])=><div key={l} className="px-6 py-3 text-center sm:text-left"><p className="text-2xl font-bold text-[#0b1d38]">{v}</p><p className="mt-1 text-sm text-slate-500">{l}</p></div>)}</div></section><section id="product" className="mx-auto max-w-7xl px-6 py-24"><div className="max-w-2xl"><p className="text-sm font-bold uppercase tracking-[.18em] text-[#1463df]">Introducing BizPilot</p><h2 className="mt-4 text-4xl font-bold tracking-tight text-[#0b1d38]">One platform. Every part of your business. Complete control.</h2><p className="mt-5 text-lg leading-8 text-slate-600">From the first sale to the next big decision, BizPilot gives your team one reliable source of truth.</p></div><div id="features" className="mt-12 grid gap-5 md:grid-cols-3">{features.map(({icon:Icon,title,text})=><div key={title} className="rounded-2xl border border-slate-200 bg-white p-7"><div className="grid size-11 place-items-center rounded-xl bg-blue-50 text-[#1463df]"><Icon className="size-5"/></div><h3 className="mt-6 text-xl font-bold text-[#0b1d38]">{title}</h3><p className="mt-3 leading-7 text-slate-600">{text}</p><Link href="/auth/register" className="mt-6 inline-flex items-center gap-1 text-sm font-bold text-[#1463df]">Learn more <ChevronRight className="size-4"/></Link></div>)}</div></section><section id="pricing" className="bg-[#0b1d38] px-6 py-20 text-white"><div className="mx-auto flex max-w-7xl flex-col justify-between gap-8 md:flex-row md:items-end"><div><p className="text-sm font-bold uppercase tracking-[.18em] text-cyan-300">Ready to move forward?</p><h2 className="mt-3 text-4xl font-bold">Build your business with clarity.</h2><p className="mt-4 max-w-xl text-blue-100">Start free, then grow into the plan that fits your ambition. No complicated setup.</p></div><Link href="/auth/register" className="inline-flex items-center gap-2 self-start rounded-lg bg-white px-5 py-3.5 font-semibold text-[#0b1d38]">Create your workspace <ArrowRight className="size-4"/></Link></div></section><footer id="contact" className="mx-auto flex max-w-7xl flex-col gap-5 px-6 py-8 text-sm text-slate-500 sm:flex-row sm:items-center sm:justify-between"><p>© 2026 Core Grid Africa. Building what African businesses need next.</p><div className="flex gap-5"><Link href="/about">About</Link><Link href="/help">Help centre</Link><Link href="mailto:hello@coregrid.africa">Contact</Link></div></footer></main>}
+import { ArrowUpRight, BarChart3, Boxes, Check, ChevronRight, CircleDot, Menu, ShieldCheck, Sparkles, Zap } from 'lucide-react'
+
+const metrics = [
+  ['2,500+', 'Businesses building better'],
+  ['₦18B+', 'Revenue tracked securely'],
+  ['99.9%', 'Platform uptime'],
+]
+
+const features = [
+  { icon: BarChart3, label: 'Clarity', title: 'See the whole business.', text: 'Replace scattered spreadsheets with a live command centre for sales, profit and performance.' },
+  { icon: Boxes, label: 'Control', title: 'Make every move count.', text: 'Connect inventory, purchases, expenses and customers in one intelligent workspace.' },
+  { icon: ShieldCheck, label: 'Confidence', title: 'Built for serious growth.', text: 'Enterprise-grade security and simple access controls keep your business moving safely.' },
+]
+
+export default function Home() {
+  return (
+    <main className="site-shell">
+      <header className="site-header">
+        <Link href="/" className="brand" aria-label="Core Grid Africa home">
+          <span className="brand-mark"><span /> <span /></span>
+          <span>CORE GRID <b>AFRICA</b></span>
+        </Link>
+        <nav className="desktop-nav" aria-label="Main navigation">
+          <Link href="#platform">Platform</Link>
+          <Link href="#why-us">Why Core Grid</Link>
+          <Link href="#pricing">Pricing</Link>
+          <Link href="/about">Company</Link>
+        </nav>
+        <div className="header-actions">
+          <Link href="/auth/login" className="login-link">Log in</Link>
+          <Link href="/auth/register" className="button button-small">Get started <ArrowUpRight size={15} /></Link>
+          <button className="mobile-menu" aria-label="Open menu"><Menu size={21} /></button>
+        </div>
+      </header>
+
+      <section className="hero" id="platform">
+        <div className="hero-grid" />
+        <div className="hero-copy">
+          <div className="eyebrow"><Sparkles size={14} /> The operating system for ambitious businesses</div>
+          <h1>Build the business<br /><em>you came for.</em></h1>
+          <p className="hero-lede">Core Grid Africa gives growing businesses the visibility, control and intelligence to turn momentum into meaningful scale.</p>
+          <div className="hero-actions">
+            <Link href="/auth/register" className="button">Start with BizPilot <ArrowUpRight size={17} /></Link>
+            <Link href="#why-us" className="text-link">Explore the platform <ChevronRight size={16} /></Link>
+          </div>
+          <div className="hero-note"><CircleDot size={13} /> Trusted by operators across Africa</div>
+        </div>
+        <div className="hero-visual" aria-label="BizPilot analytics preview">
+          <div className="visual-glow" />
+          <div className="dashboard-card">
+            <div className="dashboard-top"><span className="window-dots"><i /><i /><i /></span><span className="dashboard-label">BIZPILOT / OVERVIEW</span><span className="live-dot">LIVE</span></div>
+            <div className="dashboard-heading"><div><span className="muted-label">Good morning, operator</span><h3>Business overview</h3></div><span className="date-pill">This month ⌄</span></div>
+            <div className="mini-metrics"><div><span>Revenue</span><strong>₦24.8m</strong><small className="positive">↗ 18.4%</small></div><div><span>Net profit</span><strong>₦8.2m</strong><small className="positive">↗ 12.8%</small></div></div>
+            <div className="chart-box"><div className="chart-header"><span>Revenue performance</span><span className="muted-label">Jan — Jun 2025</span></div><div className="bars">{[34,48,40,62,57,78,67,91,76,100].map((height, i) => <span key={i} style={{ height: `${height}%` }} className={i === 9 ? 'active' : ''} />)}</div><div className="chart-axis"><span>JAN</span><span>MAR</span><span>MAY</span><span>JUN</span></div></div>
+            <div className="dashboard-footer"><span><i className="status-dot" /> All systems operational</span><span>View reports <ArrowUpRight size={13} /></span></div>
+          </div>
+          <div className="float-card"><span className="float-icon"><Zap size={15} /></span><span><b>₦4.2m</b><small>Profit this week</small></span><span className="trend">+24%</span></div>
+        </div>
+      </section>
+
+      <section className="metrics" aria-label="Platform metrics">{metrics.map(([value, label]) => <div className="metric" key={label}><strong>{value}</strong><span>{label}</span></div>)}</section>
+
+      <section className="intro-section" id="why-us">
+        <div className="section-kicker">01 / A better way to operate</div>
+        <div className="intro-grid"><h2>Less guessing.<br /><span>More building.</span></h2><p>Growth should not feel like a game of catch-up. We bring the essential systems of your business into focus, so you can spend less time searching for answers and more time acting on them.</p></div>
+      </section>
+
+      <section className="feature-section"><div className="feature-heading"><div><div className="section-kicker">02 / One clear advantage</div><h2>Everything aligned.<br /><span>Nothing in the way.</span></h2></div><p>One powerful workspace for the numbers, workflows and decisions that move your business forward.</p></div><div className="feature-grid">{features.map(({ icon: Icon, label, title, text }, index) => <article className="feature-card" key={title}><div className="feature-number">0{index + 1}</div><div className="feature-icon"><Icon size={21} /></div><span className="feature-label">{label}</span><h3>{title}</h3><p>{text}</p><Link href="/bizpilot">Learn more <ArrowUpRight size={15} /></Link></article>)}</div></section>
+
+      <section className="cta-section" id="pricing"><div><div className="eyebrow">Ready when you are</div><h2>Make your next chapter<br /><em>your strongest one.</em></h2></div><Link href="/auth/register" className="button button-light">Get started for free <ArrowUpRight size={17} /></Link></section>
+      <footer className="site-footer"><Link href="/" className="brand"><span className="brand-mark"><span /><span /></span><span>CORE GRID <b>AFRICA</b></span></Link><span>© 2025 Core Grid Africa</span><div><Link href="/contact">Contact</Link><Link href="/about">About</Link><Link href="/auth/login">Log in</Link></div></footer>
+    </main>
+  )
+}
