@@ -25,6 +25,9 @@ export default function Home() {
           <Link href="#platform">Platform</Link>
           <Link href="#why-us">Why Core Grid</Link>
           <Link href="#pricing">Pricing</Link>
+          <Link href="#catalogue">Solutions</Link>
+          <Link href="#why-us">Why Core Grid</Link>
+          <Link href="#pricing">Pricing</Link>
           <Link href="/about">Company</Link>
         </nav>
         <div className="header-actions">
@@ -68,6 +71,13 @@ export default function Home() {
 
       <section className="feature-section"><div className="feature-heading"><div><div className="section-kicker">02 / One clear advantage</div><h2>Everything aligned.<br /><span>Nothing in the way.</span></h2></div><p>One powerful workspace for the numbers, workflows and decisions that move your business forward.</p></div><div className="feature-grid">{features.map(({ icon: Icon, label, title, text }, index) => <article className="feature-card" key={title}><div className="feature-number">0{index + 1}</div><div className="feature-icon"><Icon size={21} /></div><span className="feature-label">{label}</span><h3>{title}</h3><p>{text}</p><Link href="/bizpilot">Learn more <ArrowUpRight size={15} /></Link></article>)}</div></section>
 
+      <section className="catalogue-section" id="catalogue">
+        <div className="section-kicker">03 / The Core Grid catalogue</div>
+        <div className="catalogue-heading"><div><h2>Tools for every<br /><span>growth moment.</span></h2></div><p>Start with the essentials, then add the intelligence your operation needs as you grow. One connected ecosystem, designed around the way African businesses actually work.</p></div>
+        <div className="catalogue-grid">
+          {[['01','BizPilot','Business command centre','Know your numbers. Move with confidence.','/bizpilot'],['02','Stockroom','Inventory & procurement','Never lose a sale to stock you cannot see.','/products'],['03','Pulse','Reports & insights','Turn daily activity into decisions that compound.','/dashboard']].map(([number,title,subtitle,text,href]) => <Link className="catalogue-card" href={href} key={title}><span className="catalogue-number">{number}</span><div><span className="catalogue-subtitle">{subtitle}</span><h3>{title}</h3><p>{text}</p></div><span className="catalogue-arrow"><ArrowUpRight size={18} /></span></Link>)}
+        </div>
+      </section>
       <section className="cta-section" id="pricing"><div><div className="eyebrow">Ready when you are</div><h2>Make your next chapter<br /><em>your strongest one.</em></h2></div><Link href="/auth/register" className="button button-light">Get started for free <ArrowUpRight size={17} /></Link></section>
       <footer className="site-footer"><Link href="/" className="brand"><span className="brand-mark"><span /><span /></span><span>CORE GRID <b>AFRICA</b></span></Link><span>© 2025 Core Grid Africa</span><div><Link href="/contact">Contact</Link><Link href="/about">About</Link><Link href="/auth/login">Log in</Link></div></footer>
     </main>
