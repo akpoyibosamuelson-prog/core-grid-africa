@@ -25,9 +25,10 @@ export default function Home() {
           <Link href="#platform">Platform</Link>
           <Link href="#why-us">Why Core Grid</Link>
           <Link href="#pricing">Pricing</Link>
-          <Link href="#catalogue">Solutions</Link>
-          <Link href="#why-us">Why Core Grid</Link>
-          <Link href="#pricing">Pricing</Link>
+          <Link href="/features">Features</Link>
+          <Link href="/solutions">Solutions</Link>
+          <Link href="/pricing">Pricing</Link>
+          <Link href="/resources">Resources</Link>
           <Link href="/about">Company</Link>
         </nav>
         <div className="header-actions">

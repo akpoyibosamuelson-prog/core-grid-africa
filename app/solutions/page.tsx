@@ -1,0 +1,2 @@
+import { MarketingPage } from '@/components/marketing-page'
+export default function SolutionsPage() { return <MarketingPage eyebrow="Core Grid / Solutions" title="Built around how African businesses operate." intro="Start with the workflows that matter most, then scale into deeper intelligence as your operation grows." items={['Retail and distribution', 'Professional services', 'Hospitality and food businesses', 'Health and beauty operators', 'Multi-location businesses', 'Growing teams and founders']} /> }

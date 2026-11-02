@@ -1,0 +1,2 @@
+import { MarketingPage } from '@/components/marketing-page'
+export default function ResourcesPage() { return <MarketingPage eyebrow="Core Grid / Resources" title="Practical clarity for ambitious operators." intro="Learn how to make better decisions with cleaner records, stronger routines and a complete view of your business." items={['Business operations guides', 'Inventory and cash flow playbooks', 'Growth planning resources', 'Founder checklists', 'Product updates', 'Support for your team']} /> }

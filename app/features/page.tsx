@@ -1,0 +1,2 @@
+import { MarketingPage } from '@/components/marketing-page'
+export default function FeaturesPage() { return <MarketingPage eyebrow="BizPilot / Features" title="The operating system for everyday progress." intro="Bring sales, inventory, expenses, customers and decisions into one calm, connected workspace." items={['Live business dashboard', 'Sales and point of sale workflows', 'Inventory and stock control', 'Expenses and financial visibility', 'Customer and team management', 'Reports that turn activity into action']} /> }
