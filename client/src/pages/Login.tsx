@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { Link, Redirect } from "wouter";
 import { useAuth } from "@/_core/useAuth";
+import { Logo } from "@/components/brand/Logo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -26,44 +27,48 @@ export default function Login() {
     }
   }
 
-  // Declarative, not `navigate()` straight after the await. The auth query's
-  // cache update and this component's re-render are not the same tick, so an
-  // imperative jump reaches the guarded route while `user` is still null, and
-  // <Protected> bounces it right back here — the user has signed up or logged
-  // in successfully and is looking at a login form. Rendering a Redirect once
-  // `user` actually exists waits for the state to arrive.
-  if (user) return <Redirect to="/dashboard" />;
+  if (user) return <Redirect to="/app" />;
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-sm flex-col justify-center p-6">
-      <Card>
-        <CardHeader>
-          <CardTitle>Welcome back</CardTitle>
-          <CardDescription>Log in to your account.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={onSubmit} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
-              <Input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
-              <Input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
-            </div>
-            {error && <p className="text-sm text-destructive">{error}</p>}
-            <Button type="submit" className="w-full" disabled={busy}>
-              {busy ? "Logging in…" : "Log in"}
-            </Button>
-          </form>
-          <p className="mt-4 text-center text-sm text-muted-foreground">
-            No account?{" "}
-            <Link to="/signup" className="underline">
-              Sign up
-            </Link>
+    <div className="flex min-h-screen flex-col bg-background">
+      <div className="flex flex-1 items-center justify-center p-6">
+        <div className="w-full max-w-sm">
+          <div className="mb-8 flex justify-center">
+            <Link to="/"><Logo /></Link>
+          </div>
+          <Card>
+            <CardHeader>
+              <CardTitle>Welcome back</CardTitle>
+              <CardDescription>Log in to your Core Grid Africa account.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={onSubmit} className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="email">Email</Label>
+                  <Input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="password">Password</Label>
+                  <Input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+                </div>
+                {error && <p className="text-sm text-destructive">{error}</p>}
+                <Button type="submit" className="w-full" disabled={busy}>
+                  {busy ? "Logging in…" : "Log in"}
+                </Button>
+              </form>
+              <p className="mt-4 text-center text-sm text-muted-foreground">
+                No account?{" "}
+                <Link to="/register" className="font-medium text-primary hover:underline">
+                  Create one free
+                </Link>
+              </p>
+            </CardContent>
+          </Card>
+          <p className="mt-6 text-center text-xs text-muted-foreground">
+            <Link to="/" className="hover:text-foreground">← Back to home</Link>
           </p>
-        </CardContent>
-      </Card>
-    </main>
+        </div>
+      </div>
+    </div>
   );
 }

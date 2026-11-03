@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { trpc, makeTrpcClient } from "./_core/trpc";
 import { AuthProvider } from "./_core/useAuth";
+import { BusinessProvider } from "./hooks/useBusiness";
 import { ErrorBoundary } from "./_core/ErrorBoundary";
 import App from "./App";
 import "./index.css";
@@ -14,7 +15,9 @@ function Root() {
     <trpc.Provider client={trpcClient} queryClient={queryClient}>
       <QueryClientProvider client={queryClient}>
         <AuthProvider>
-          <App />
+          <BusinessProvider>
+            <App />
+          </BusinessProvider>
         </AuthProvider>
       </QueryClientProvider>
     </trpc.Provider>

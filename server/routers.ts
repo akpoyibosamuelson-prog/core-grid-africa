@@ -1,17 +1,37 @@
 // ── AGENT-OWNED: tRPC API surface ────────────────────────────────────────────
-// Compose the app's procedures here. Keep them thin: validate input with zod,
-// call server/db.ts for data and server/services/* for external integrations.
-// Auth is provided by _core — do NOT reimplement sessions. Access levels:
-// publicProcedure (anyone) / protectedProcedure (ctx.user set) / adminProcedure.
+// Thin procedures: validate with zod, resolve the caller's business membership
+// (the isolation boundary), then call server/db.ts. Auth comes from _core.
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { router, publicProcedure, protectedProcedure } from "./_core/trpc";
+import { router, publicProcedure, protectedProcedure, adminProcedure } from "./_core/trpc";
 import { authProvider, registerLocalUser, AuthError, EmailTakenError } from "./_core/auth";
 import { storageCommit, storageDeleteOwned, storageListByOwner, storagePutUrl, StorageError } from "./_core/storage";
 import * as q from "./db";
+import { roleCanAccess, type MemberRole } from "../shared/constants";
+import { slugify } from "../shared/format";
+import { paystack } from "./services/paystack";
 
-// Auth: login/logout are provider-agnostic (go through the AuthProvider).
-// signup is LOCAL-only (SSO signup happens at the IdP) — guard if you switch.
+// ── Membership guard ─────────────────────────────────────────────────────────
+async function assertMember(userId: string, businessId: string, moduleKey?: string) {
+  const m = await q.getMembership(userId, businessId);
+  if (!m) throw new TRPCError({ code: "FORBIDDEN", message: "You do not have access to this business." });
+  if (moduleKey && !roleCanAccess(m.role as MemberRole, moduleKey)) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "Your role does not permit this action." });
+  }
+  return m;
+}
+
+async function assertOwnerOrAdmin(userId: string, businessId: string) {
+  const m = await assertMember(userId, businessId);
+  if (m.role !== "OWNER" && m.role !== "ADMIN") {
+    throw new TRPCError({ code: "FORBIDDEN", message: "Only the owner or an administrator can do this." });
+  }
+  return m;
+}
+
+const bizInput = z.object({ businessId: z.uuid() });
+
+// ── Auth ─────────────────────────────────────────────────────────────────────
 const authRouter = router({
   me: publicProcedure.query(({ ctx }) => ctx.user),
 
@@ -20,13 +40,9 @@ const authRouter = router({
     .mutation(async ({ ctx, input }) => {
       try {
         const user = await registerLocalUser(input.email, input.password, input.name);
-        await authProvider().login(ctx.c, input.email, input.password); // set session cookie
+        await authProvider().login(ctx.c, input.email, input.password);
         return user;
       } catch (e: unknown) {
-        // CONFLICT, not a 500: the request was well-formed, the address is just
-        // taken. registerLocalUser has already turned the driver's SQLSTATE
-        // 23505 into this type — never pattern-match a DB error message here,
-        // Drizzle hides it behind a "Failed query: <sql>" wrapper.
         if (e instanceof EmailTakenError) throw new TRPCError({ code: "CONFLICT", message: e.message });
         throw e;
       }
@@ -49,112 +65,797 @@ const authRouter = router({
   }),
 });
 
-// Example business router (items). Every procedure is owner-scoped via ctx.user.
-const itemsRouter = router({
-  list: protectedProcedure.query(({ ctx }) => q.listItemsByOwner(ctx.user.id)),
+// ── Business ─────────────────────────────────────────────────────────────────
+const businessRouter = router({
+  listMine: protectedProcedure.query(({ ctx }) => q.listMembershipsForUser(ctx.user.id)),
+
+  current: protectedProcedure.input(bizInput).query(async ({ ctx, input }) => {
+    await assertMember(ctx.user.id, input.businessId);
+    const biz = await q.getBusiness(input.businessId);
+    if (!biz) throw new TRPCError({ code: "NOT_FOUND" });
+    const membership = await q.getMembership(ctx.user.id, input.businessId);
+    const subscription = await q.getSubscription(input.businessId);
+    return { business: biz, role: membership?.role ?? "EMPLOYEE", subscription };
+  }),
 
   create: protectedProcedure
-    .input(z.object({ title: z.string().min(1), notes: z.string().optional(), coverUrl: z.string().optional() }))
-    .mutation(({ ctx, input }) => q.createItem({ ownerId: ctx.user.id, ...input })),
+    .input(
+      z.object({
+        name: z.string().min(2),
+        industry: z.string().optional(),
+        phone: z.string().optional(),
+        email: z.string().optional(),
+        address: z.string().optional(),
+        city: z.string().optional(),
+        state: z.string().optional(),
+        currency: z.string().default("NGN"),
+        currencySymbol: z.string().default("₦"),
+        taxRate: z.number().int().min(0).max(10000).default(0),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const base = slugify(input.name) || "business";
+      const slug = `${base}-${Math.random().toString(36).slice(2, 7)}`;
+      const biz = await q.createBusinessWithOwner({ ownerId: ctx.user.id, slug, ...input });
+      await q.logAudit(biz.id, ctx.user.id, "BUSINESS_CREATED", "business", biz.id, { name: biz.name });
+      return biz;
+    }),
 
-  remove: protectedProcedure
-    .input(z.object({ id: z.uuid() }))
-    .mutation(({ ctx, input }) => q.deleteItem(input.id, ctx.user.id)),
+  update: protectedProcedure
+    .input(
+      bizInput.extend({
+        name: z.string().min(2).optional(),
+        industry: z.string().optional(),
+        phone: z.string().optional(),
+        email: z.string().optional(),
+        address: z.string().optional(),
+        city: z.string().optional(),
+        state: z.string().optional(),
+        currency: z.string().optional(),
+        currencySymbol: z.string().optional(),
+        taxRate: z.number().int().min(0).max(10000).optional(),
+        logoUrl: z.string().optional(),
+        invoicePrefix: z.string().optional(),
+        receiptFooter: z.string().optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      await assertOwnerOrAdmin(ctx.user.id, input.businessId);
+      const { businessId, ...patch } = input;
+      const row = await q.updateBusiness(businessId, patch);
+      await q.logAudit(businessId, ctx.user.id, "BUSINESS_UPDATED", "business", businessId, patch);
+      return row;
+    }),
 });
 
-// Sanitize a caller-supplied filename down to a safe key BASENAME: take the
-// last path segment (so "/../shared/report.pdf" can't steer the rest of the
-// key), keep only [A-Za-z0-9._-], strip leading dots (so a survivor of "." or
-// ".." can't slip through as a bare segment), and fall back to a fixed constant
-// when nothing survives. Exported so it can be unit-tested directly.
-//
-// The stem and the extension are sanitized SEPARATELY, and that split is the
-// whole point. Sanitizing the basename as one string used to destroy the
-// extension of any file whose stem was entirely non-ASCII: the allowlist below
-// deleted every CJK character in "风景.png", leaving ".png", and the leading-dot
-// strip — there to kill "." / ".." / dotfiles — then ate the extension
-// separator, because by that point it was the only dot left. The object landed
-// in storage as "<uuid>-png". Splitting first means the leading-dot rule only
-// ever sees the stem, where a leading dot really is a dotfile prefix.
+// ── Branches ─────────────────────────────────────────────────────────────────
+const branchRouter = router({
+  list: protectedProcedure.input(bizInput).query(async ({ ctx, input }) => {
+    await assertMember(ctx.user.id, input.businessId);
+    return q.listBranches(input.businessId);
+  }),
+  create: protectedProcedure
+    .input(bizInput.extend({ name: z.string().min(1), address: z.string().optional(), phone: z.string().optional() }))
+    .mutation(async ({ ctx, input }) => {
+      await assertOwnerOrAdmin(ctx.user.id, input.businessId);
+      const { businessId, ...rest } = input;
+      return q.createBranch(businessId, rest);
+    }),
+  remove: protectedProcedure
+    .input(bizInput.extend({ id: z.uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      await assertOwnerOrAdmin(ctx.user.id, input.businessId);
+      return q.deleteBranch(input.businessId, input.id);
+    }),
+});
+
+// ── Categories ───────────────────────────────────────────────────────────────
+const categoryRouter = router({
+  list: protectedProcedure
+    .input(bizInput.extend({ kind: z.string().optional() }))
+    .query(async ({ ctx, input }) => {
+      await assertMember(ctx.user.id, input.businessId);
+      return q.listCategories(input.businessId, input.kind);
+    }),
+  create: protectedProcedure
+    .input(bizInput.extend({ name: z.string().min(1), kind: z.string().default("PRODUCT") }))
+    .mutation(async ({ ctx, input }) => {
+      await assertMember(ctx.user.id, input.businessId, "inventory");
+      const { businessId, ...rest } = input;
+      return q.createCategory(businessId, rest);
+    }),
+  remove: protectedProcedure
+    .input(bizInput.extend({ id: z.uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      await assertMember(ctx.user.id, input.businessId, "inventory");
+      return q.deleteCategory(input.businessId, input.id);
+    }),
+});
+
+// ── Suppliers ────────────────────────────────────────────────────────────────
+const supplierRouter = router({
+  list: protectedProcedure
+    .input(bizInput.extend({ search: z.string().optional() }))
+    .query(async ({ ctx, input }) => {
+      await assertMember(ctx.user.id, input.businessId);
+      return q.listSuppliers(input.businessId, input.search);
+    }),
+  create: protectedProcedure
+    .input(
+      bizInput.extend({
+        name: z.string().min(1),
+        contactName: z.string().optional(),
+        phone: z.string().optional(),
+        email: z.string().optional(),
+        address: z.string().optional(),
+        notes: z.string().optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      await assertMember(ctx.user.id, input.businessId, "suppliers");
+      const { businessId, ...rest } = input;
+      return q.createSupplier(businessId, rest);
+    }),
+  update: protectedProcedure
+    .input(bizInput.extend({ id: z.uuid() }).passthrough())
+    .mutation(async ({ ctx, input }) => {
+      await assertMember(ctx.user.id, input.businessId, "suppliers");
+      const { businessId, id, ...patch } = input;
+      return q.updateSupplier(businessId, id, patch);
+    }),
+  remove: protectedProcedure
+    .input(bizInput.extend({ id: z.uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      await assertMember(ctx.user.id, input.businessId, "suppliers");
+      return q.deleteSupplier(input.businessId, input.id);
+    }),
+});
+
+// ── Customers ────────────────────────────────────────────────────────────────
+const customerRouter = router({
+  list: protectedProcedure
+    .input(bizInput.extend({ search: z.string().optional() }))
+    .query(async ({ ctx, input }) => {
+      await assertMember(ctx.user.id, input.businessId);
+      return q.listCustomers(input.businessId, input.search);
+    }),
+  listWithStats: protectedProcedure
+    .input(bizInput.extend({ search: z.string().optional() }))
+    .query(async ({ ctx, input }) => {
+      await assertMember(ctx.user.id, input.businessId);
+      return q.listCustomersWithStats(input.businessId, input.search);
+    }),
+  create: protectedProcedure
+    .input(
+      bizInput.extend({
+        name: z.string().min(1),
+        phone: z.string().optional(),
+        email: z.string().optional(),
+        address: z.string().optional(),
+        category: z.string().optional(),
+        notes: z.string().optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      await assertMember(ctx.user.id, input.businessId, "customers");
+      const { businessId, ...rest } = input;
+      const row = await q.createCustomer(businessId, rest);
+      await q.createNotification(businessId, { type: "CUSTOMER", title: "New customer added", message: row.name, link: "/app/customers" });
+      return row;
+    }),
+  update: protectedProcedure
+    .input(bizInput.extend({ id: z.uuid() }).passthrough())
+    .mutation(async ({ ctx, input }) => {
+      await assertMember(ctx.user.id, input.businessId, "customers");
+      const { businessId, id, ...patch } = input;
+      return q.updateCustomer(businessId, id, patch);
+    }),
+  remove: protectedProcedure
+    .input(bizInput.extend({ id: z.uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      await assertMember(ctx.user.id, input.businessId, "customers");
+      return q.deleteCustomer(input.businessId, input.id);
+    }),
+});
+
+// ── Products / inventory ─────────────────────────────────────────────────────
+const productRouter = router({
+  list: protectedProcedure
+    .input(bizInput.extend({ search: z.string().optional(), categoryId: z.uuid().optional(), lowStockOnly: z.boolean().optional() }))
+    .query(async ({ ctx, input }) => {
+      await assertMember(ctx.user.id, input.businessId);
+      const { businessId, ...opts } = input;
+      return q.listProducts(businessId, opts);
+    }),
+  get: protectedProcedure
+    .input(bizInput.extend({ id: z.uuid() }))
+    .query(async ({ ctx, input }) => {
+      await assertMember(ctx.user.id, input.businessId);
+      return q.getProduct(input.businessId, input.id);
+    }),
+  create: protectedProcedure
+    .input(
+      bizInput.extend({
+        name: z.string().min(1),
+        categoryId: z.uuid().optional(),
+        supplierId: z.uuid().optional(),
+        sku: z.string().optional(),
+        barcode: z.string().optional(),
+        unit: z.string().optional(),
+        costPrice: z.number().int().min(0).default(0),
+        wholesalePrice: z.number().int().min(0).default(0),
+        retailPrice: z.number().int().min(0).default(0),
+        quantity: z.number().int().min(0).default(0),
+        minStockLevel: z.number().int().min(0).default(0),
+        location: z.string().optional(),
+        imageUrl: z.string().optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      await assertMember(ctx.user.id, input.businessId, "inventory");
+      const { businessId, ...rest } = input;
+      const row = await q.createProduct(businessId, rest);
+      await q.logAudit(businessId, ctx.user.id, "PRODUCT_CREATED", "product", row.id, { name: row.name });
+      return row;
+    }),
+  update: protectedProcedure
+    .input(bizInput.extend({ id: z.uuid() }).passthrough())
+    .mutation(async ({ ctx, input }) => {
+      await assertMember(ctx.user.id, input.businessId, "inventory");
+      const { businessId, id, ...patch } = input;
+      return q.updateProduct(businessId, id, patch);
+    }),
+  remove: protectedProcedure
+    .input(bizInput.extend({ id: z.uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      await assertMember(ctx.user.id, input.businessId, "inventory");
+      return q.deleteProduct(input.businessId, input.id);
+    }),
+  adjustStock: protectedProcedure
+    .input(bizInput.extend({ productId: z.uuid(), delta: z.number().int(), reason: z.string().min(1) }))
+    .mutation(async ({ ctx, input }) => {
+      await assertMember(ctx.user.id, input.businessId, "inventory");
+      return q.adjustStock(input.businessId, { productId: input.productId, delta: input.delta, reason: input.reason, userId: ctx.user.id });
+    }),
+  movements: protectedProcedure
+    .input(bizInput.extend({ productId: z.uuid().optional() }))
+    .query(async ({ ctx, input }) => {
+      await assertMember(ctx.user.id, input.businessId);
+      return q.listStockMovements(input.businessId, input.productId);
+    }),
+  summary: protectedProcedure.input(bizInput).query(async ({ ctx, input }) => {
+    await assertMember(ctx.user.id, input.businessId);
+    return q.inventorySummary(input.businessId);
+  }),
+});
+
+// ── Sales ────────────────────────────────────────────────────────────────────
+const saleLine = z.object({
+  productId: z.uuid().optional(),
+  name: z.string().min(1),
+  quantity: z.number().int().positive(),
+  unitPrice: z.number().int().min(0),
+  costPrice: z.number().int().min(0).optional(),
+  discount: z.number().int().min(0).optional(),
+});
+
+const saleRouter = router({
+  list: protectedProcedure
+    .input(bizInput.extend({ from: z.string().optional(), to: z.string().optional(), search: z.string().optional() }))
+    .query(async ({ ctx, input }) => {
+      await assertMember(ctx.user.id, input.businessId);
+      return q.listSales(input.businessId, {
+        from: input.from ? new Date(input.from) : undefined,
+        to: input.to ? new Date(input.to) : undefined,
+        search: input.search,
+      });
+    }),
+  get: protectedProcedure
+    .input(bizInput.extend({ id: z.uuid() }))
+    .query(async ({ ctx, input }) => {
+      await assertMember(ctx.user.id, input.businessId);
+      return q.getSale(input.businessId, input.id);
+    }),
+  create: protectedProcedure
+    .input(
+      bizInput.extend({
+        branchId: z.uuid().optional(),
+        customerId: z.uuid().optional(),
+        reference: z.string().min(1),
+        items: z.array(saleLine).min(1),
+        discount: z.number().int().min(0).default(0),
+        taxRate: z.number().int().min(0).max(10000).default(0),
+        amountPaid: z.number().int().min(0).default(0),
+        paymentMethod: z.enum(["CASH", "BANK_TRANSFER", "POS", "ONLINE", "OTHER"]).default("CASH"),
+        notes: z.string().optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      await assertMember(ctx.user.id, input.businessId, "sales");
+      const { businessId, ...rest } = input;
+      const sale = await q.createSale(businessId, { userId: ctx.user.id, ...rest });
+      await q.createNotification(businessId, {
+        type: "SALE",
+        title: "New sale recorded",
+        message: `${input.reference} · ${input.items.length} item(s)`,
+        link: "/app/sales",
+      });
+      // Low-stock alerts for any product that dropped to/below its minimum.
+      for (const it of input.items) {
+        if (!it.productId) continue;
+        const p = await q.getProduct(businessId, it.productId);
+        if (p && p.quantity <= p.minStockLevel) {
+          await q.createNotification(businessId, {
+            type: p.quantity <= 0 ? "OUT_OF_STOCK" : "LOW_STOCK",
+            title: p.quantity <= 0 ? "Out of stock" : "Low stock alert",
+            message: `${p.name} is at ${p.quantity} ${p.unit}`,
+            link: "/app/inventory",
+          });
+        }
+      }
+      return sale;
+    }),
+  cancel: protectedProcedure
+    .input(bizInput.extend({ id: z.uuid(), reason: z.string().min(1) }))
+    .mutation(async ({ ctx, input }) => {
+      await assertOwnerOrAdmin(ctx.user.id, input.businessId);
+      return q.cancelSale(input.businessId, input.id, ctx.user.id, input.reason);
+    }),
+});
+
+// ── Purchases ────────────────────────────────────────────────────────────────
+const purchaseRouter = router({
+  list: protectedProcedure
+    .input(bizInput.extend({ from: z.string().optional(), to: z.string().optional() }))
+    .query(async ({ ctx, input }) => {
+      await assertMember(ctx.user.id, input.businessId);
+      return q.listPurchases(input.businessId, {
+        from: input.from ? new Date(input.from) : undefined,
+        to: input.to ? new Date(input.to) : undefined,
+      });
+    }),
+  get: protectedProcedure
+    .input(bizInput.extend({ id: z.uuid() }))
+    .query(async ({ ctx, input }) => {
+      await assertMember(ctx.user.id, input.businessId);
+      return q.getPurchase(input.businessId, input.id);
+    }),
+  create: protectedProcedure
+    .input(
+      bizInput.extend({
+        supplierId: z.uuid().optional(),
+        branchId: z.uuid().optional(),
+        reference: z.string().min(1),
+        items: z
+          .array(z.object({ productId: z.uuid().optional(), name: z.string().min(1), quantity: z.number().int().positive(), unitCost: z.number().int().min(0) }))
+          .min(1),
+        amountPaid: z.number().int().min(0).default(0),
+        status: z.enum(["DRAFT", "ORDERED", "RECEIVED", "CANCELLED"]).default("DRAFT"),
+        notes: z.string().optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      await assertMember(ctx.user.id, input.businessId, "purchases");
+      const { businessId, ...rest } = input;
+      return q.createPurchase(businessId, { userId: ctx.user.id, ...rest });
+    }),
+  receive: protectedProcedure
+    .input(bizInput.extend({ id: z.uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      await assertMember(ctx.user.id, input.businessId, "purchases");
+      return q.receivePurchase(input.businessId, input.id, ctx.user.id);
+    }),
+});
+
+// ── Expenses ─────────────────────────────────────────────────────────────────
+const expenseRouter = router({
+  list: protectedProcedure
+    .input(bizInput.extend({ from: z.string().optional(), to: z.string().optional(), search: z.string().optional(), categoryId: z.uuid().optional() }))
+    .query(async ({ ctx, input }) => {
+      await assertMember(ctx.user.id, input.businessId);
+      return q.listExpenses(input.businessId, {
+        from: input.from ? new Date(input.from) : undefined,
+        to: input.to ? new Date(input.to) : undefined,
+        search: input.search,
+        categoryId: input.categoryId,
+      });
+    }),
+  create: protectedProcedure
+    .input(
+      bizInput.extend({
+        branchId: z.uuid().optional(),
+        categoryId: z.uuid().optional(),
+        description: z.string().min(1),
+        amount: z.number().int().positive(),
+        paymentMethod: z.enum(["CASH", "BANK_TRANSFER", "POS", "ONLINE", "OTHER"]).default("CASH"),
+        expenseDate: z.string().optional(),
+        receiptUrl: z.string().optional(),
+        isRecurring: z.boolean().default(false),
+        recurrence: z.string().optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      await assertMember(ctx.user.id, input.businessId, "expenses");
+      const { businessId, ...rest } = input;
+      const row = await q.createExpense(businessId, {
+        userId: ctx.user.id,
+        ...rest,
+        expenseDate: rest.expenseDate ? new Date(rest.expenseDate) : undefined,
+      });
+      await q.logAudit(businessId, ctx.user.id, "EXPENSE_CREATED", "expense", row.id, { amount: row.amount });
+      return row;
+    }),
+  update: protectedProcedure
+    .input(bizInput.extend({ id: z.uuid() }).passthrough())
+    .mutation(async ({ ctx, input }) => {
+      await assertMember(ctx.user.id, input.businessId, "expenses");
+      const { businessId, id, ...patch } = input;
+      return q.updateExpense(businessId, id, patch);
+    }),
+  remove: protectedProcedure
+    .input(bizInput.extend({ id: z.uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      await assertMember(ctx.user.id, input.businessId, "expenses");
+      return q.deleteExpense(input.businessId, input.id);
+    }),
+});
+
+// ── Orders & deliveries ──────────────────────────────────────────────────────
+const orderRouter = router({
+  list: protectedProcedure
+    .input(bizInput.extend({ status: z.string().optional(), search: z.string().optional() }))
+    .query(async ({ ctx, input }) => {
+      await assertMember(ctx.user.id, input.businessId);
+      return q.listOrders(input.businessId, { status: input.status, search: input.search });
+    }),
+  get: protectedProcedure
+    .input(bizInput.extend({ id: z.uuid() }))
+    .query(async ({ ctx, input }) => {
+      await assertMember(ctx.user.id, input.businessId);
+      return q.getOrder(input.businessId, input.id);
+    }),
+  create: protectedProcedure
+    .input(
+      bizInput.extend({
+        customerId: z.uuid().optional(),
+        reference: z.string().min(1),
+        items: z
+          .array(z.object({ productId: z.uuid().optional(), name: z.string().min(1), quantity: z.number().int().positive(), unitPrice: z.number().int().min(0) }))
+          .min(1),
+        deliveryAddress: z.string().optional(),
+        notes: z.string().optional(),
+        amountPaid: z.number().int().min(0).default(0),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      await assertMember(ctx.user.id, input.businessId, "orders");
+      const { businessId, ...rest } = input;
+      const order = await q.createOrder(businessId, { userId: ctx.user.id, ...rest });
+      await q.createNotification(businessId, { type: "ORDER", title: "New order created", message: input.reference, link: "/app/orders" });
+      return order;
+    }),
+  updateStatus: protectedProcedure
+    .input(bizInput.extend({ id: z.uuid(), status: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      await assertMember(ctx.user.id, input.businessId, "orders");
+      return q.updateOrderStatus(input.businessId, input.id, input.status, ctx.user.id);
+    }),
+  createDelivery: protectedProcedure
+    .input(bizInput.extend({ orderId: z.uuid(), courier: z.string().optional(), trackingNumber: z.string().optional(), notes: z.string().optional() }))
+    .mutation(async ({ ctx, input }) => {
+      await assertMember(ctx.user.id, input.businessId, "orders");
+      const { businessId, ...rest } = input;
+      return q.createDelivery(businessId, rest);
+    }),
+  updateDelivery: protectedProcedure
+    .input(bizInput.extend({ id: z.uuid(), status: z.string().optional(), courier: z.string().optional(), trackingNumber: z.string().optional(), notes: z.string().optional() }))
+    .mutation(async ({ ctx, input }) => {
+      await assertMember(ctx.user.id, input.businessId, "orders");
+      const { businessId, id, ...patch } = input;
+      return q.updateDelivery(businessId, id, patch);
+    }),
+});
+
+// ── Employees & members ──────────────────────────────────────────────────────
+const employeeRouter = router({
+  list: protectedProcedure.input(bizInput).query(async ({ ctx, input }) => {
+    await assertMember(ctx.user.id, input.businessId);
+    return q.listEmployees(input.businessId);
+  }),
+  create: protectedProcedure
+    .input(
+      bizInput.extend({
+        name: z.string().min(1),
+        email: z.string().optional(),
+        phone: z.string().optional(),
+        role: z.enum(["OWNER", "ADMIN", "MANAGER", "SALES_STAFF", "INVENTORY_STAFF", "ACCOUNTANT", "EMPLOYEE"]).default("EMPLOYEE"),
+        department: z.string().optional(),
+        hiredAt: z.string().optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      await assertOwnerOrAdmin(ctx.user.id, input.businessId);
+      const { businessId, ...rest } = input;
+      return q.createEmployee(businessId, { ...rest, hiredAt: rest.hiredAt ? new Date(rest.hiredAt) : undefined });
+    }),
+  update: protectedProcedure
+    .input(bizInput.extend({ id: z.uuid() }).passthrough())
+    .mutation(async ({ ctx, input }) => {
+      await assertOwnerOrAdmin(ctx.user.id, input.businessId);
+      const { businessId, id, ...patch } = input;
+      return q.updateEmployee(businessId, id, patch);
+    }),
+  remove: protectedProcedure
+    .input(bizInput.extend({ id: z.uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      await assertOwnerOrAdmin(ctx.user.id, input.businessId);
+      return q.deleteEmployee(input.businessId, input.id);
+    }),
+  listMembers: protectedProcedure.input(bizInput).query(async ({ ctx, input }) => {
+    await assertMember(ctx.user.id, input.businessId);
+    return q.listMembers(input.businessId);
+  }),
+  updateMemberRole: protectedProcedure
+    .input(bizInput.extend({ memberId: z.uuid(), role: z.enum(["OWNER", "ADMIN", "MANAGER", "SALES_STAFF", "INVENTORY_STAFF", "ACCOUNTANT", "EMPLOYEE"]) }))
+    .mutation(async ({ ctx, input }) => {
+      await assertOwnerOrAdmin(ctx.user.id, input.businessId);
+      const row = await q.updateMemberRole(input.businessId, input.memberId, input.role);
+      await q.logAudit(input.businessId, ctx.user.id, "MEMBER_ROLE_CHANGED", "member", input.memberId, { role: input.role });
+      return row;
+    }),
+  removeMember: protectedProcedure
+    .input(bizInput.extend({ memberId: z.uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      await assertOwnerOrAdmin(ctx.user.id, input.businessId);
+      return q.removeMember(input.businessId, input.memberId);
+    }),
+});
+
+// ── Notifications ────────────────────────────────────────────────────────────
+const notificationRouter = router({
+  list: protectedProcedure.input(bizInput).query(async ({ ctx, input }) => {
+    await assertMember(ctx.user.id, input.businessId);
+    return q.listNotifications(input.businessId, ctx.user.id);
+  }),
+  unreadCount: protectedProcedure.input(bizInput).query(async ({ ctx, input }) => {
+    await assertMember(ctx.user.id, input.businessId);
+    return q.unreadNotificationCount(input.businessId, ctx.user.id);
+  }),
+  markRead: protectedProcedure
+    .input(bizInput.extend({ id: z.uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      await assertMember(ctx.user.id, input.businessId);
+      return q.markNotificationRead(input.businessId, ctx.user.id, input.id);
+    }),
+  markAllRead: protectedProcedure.input(bizInput).mutation(async ({ ctx, input }) => {
+    await assertMember(ctx.user.id, input.businessId);
+    return q.markAllNotificationsRead(input.businessId, ctx.user.id);
+  }),
+});
+
+// ── Dashboard & reports ──────────────────────────────────────────────────────
+const dashboardRouter = router({
+  stats: protectedProcedure
+    .input(bizInput.extend({ filter: z.string().default("today"), from: z.string().optional(), to: z.string().optional() }))
+    .query(async ({ ctx, input }) => {
+      await assertMember(ctx.user.id, input.businessId);
+      const { resolveDateRange } = await import("../shared/format");
+      const range = resolveDateRange(input.filter, new Date(), { from: input.from, to: input.to });
+      const [stats, trend, top, byCat, rp] = await Promise.all([
+        q.dashboardStats(input.businessId, range.from, range.to),
+        q.salesTrend(input.businessId, range.from, range.to),
+        q.topProducts(input.businessId, range.from, range.to, 5),
+        q.expenseByCategory(input.businessId, range.from, range.to),
+        q.receivablesPayables(input.businessId),
+      ]);
+      return { range: { from: range.from, to: range.to }, stats, trend, topProducts: top, expenseByCategory: byCat, ...rp };
+    }),
+  finance: protectedProcedure
+    .input(bizInput.extend({ filter: z.string().default("this_month"), from: z.string().optional(), to: z.string().optional() }))
+    .query(async ({ ctx, input }) => {
+      await assertMember(ctx.user.id, input.businessId);
+      const { resolveDateRange } = await import("../shared/format");
+      const range = resolveDateRange(input.filter, new Date(), { from: input.from, to: input.to });
+      const [stats, trend, byCat, rp, payments] = await Promise.all([
+        q.dashboardStats(input.businessId, range.from, range.to),
+        q.salesTrend(input.businessId, range.from, range.to),
+        q.expenseByCategory(input.businessId, range.from, range.to),
+        q.receivablesPayables(input.businessId),
+        q.listPayments(input.businessId, 50),
+      ]);
+      return { range: { from: range.from, to: range.to }, stats, trend, expenseByCategory: byCat, ...rp, payments };
+    }),
+  reports: protectedProcedure
+    .input(bizInput.extend({ filter: z.string().default("this_month"), from: z.string().optional(), to: z.string().optional() }))
+    .query(async ({ ctx, input }) => {
+      await assertMember(ctx.user.id, input.businessId);
+      const { resolveDateRange } = await import("../shared/format");
+      const range = resolveDateRange(input.filter, new Date(), { from: input.from, to: input.to });
+      const [stats, trend, top, byCat, sales, expenses, purchases, inv] = await Promise.all([
+        q.dashboardStats(input.businessId, range.from, range.to),
+        q.salesTrend(input.businessId, range.from, range.to),
+        q.topProducts(input.businessId, range.from, range.to, 10),
+        q.expenseByCategory(input.businessId, range.from, range.to),
+        q.listSales(input.businessId, { from: range.from, to: range.to, limit: 500 }),
+        q.listExpenses(input.businessId, { from: range.from, to: range.to }),
+        q.listPurchases(input.businessId, { from: range.from, to: range.to }),
+        q.inventorySummary(input.businessId),
+      ]);
+      return { range: { from: range.from, to: range.to }, stats, trend, topProducts: top, expenseByCategory: byCat, sales, expenses, purchases, inventory: inv };
+    }),
+  auditLogs: protectedProcedure.input(bizInput).query(async ({ ctx, input }) => {
+    await assertMember(ctx.user.id, input.businessId);
+    return q.listAuditLogs(input.businessId);
+  }),
+});
+
+// ── Payments (Paystack) ──────────────────────────────────────────────────────
+const paymentRouter = router({
+  list: protectedProcedure.input(bizInput).query(async ({ ctx, input }) => {
+    await assertMember(ctx.user.id, input.businessId);
+    return q.listPayments(input.businessId);
+  }),
+  /** Initialize a Paystack transaction. Returns the authorization URL. */
+  initialize: protectedProcedure
+    .input(bizInput.extend({ amount: z.number().int().positive(), email: z.string(), purpose: z.enum(["SALE", "SUBSCRIPTION"]).default("SALE"), plan: z.string().optional(), billingPeriod: z.enum(["MONTHLY", "ANNUAL"]).optional() }))
+    .mutation(async ({ ctx, input }) => {
+      await assertMember(ctx.user.id, input.businessId);
+      const reference = `CGA-${Date.now()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+      await q.createPaymentRecord({
+        businessId: input.businessId, type: input.purpose, reference, amount: input.amount,
+        method: "ONLINE", status: "PENDING", provider: "paystack",
+      });
+      const result = await paystack.initialize({ email: input.email, amount: input.amount, reference, metadata: { businessId: input.businessId, purpose: input.purpose, plan: input.plan } });
+      return { reference, ...result };
+    }),
+  /** Verify a transaction SERVER-SIDE. Never trust the browser's return. */
+  verify: protectedProcedure
+    .input(bizInput.extend({ reference: z.string().min(1) }))
+    .mutation(async ({ ctx, input }) => {
+      await assertMember(ctx.user.id, input.businessId);
+      const record = await q.getPaymentByReference(input.reference);
+      if (!record || record.businessId !== input.businessId) throw new TRPCError({ code: "NOT_FOUND", message: "Payment not found" });
+      if (record.status === "SUCCESS") return { status: "SUCCESS", alreadyVerified: true };
+      const result = await paystack.verify(input.reference);
+      if (result.status === "success") {
+        await q.markPaymentVerified(input.reference, String(result.id ?? ""));
+        await q.createNotification(input.businessId, { type: "PAYMENT", title: "Payment successful", message: `Reference ${input.reference}`, link: "/app/finance" });
+        return { status: "SUCCESS", amount: result.amount };
+      }
+      await q.markPaymentFailed(input.reference);
+      await q.createNotification(input.businessId, { type: "PAYMENT_FAILED", title: "Payment failed", message: `Reference ${input.reference}`, link: "/app/finance" });
+      return { status: "FAILED" };
+    }),
+  config: protectedProcedure.query(() => ({ configured: paystack.isConfigured() })),
+
+  /**
+   * Paystack webhook. Public (Paystack calls it), but the HMAC-SHA512 signature
+   * over the raw body is verified against PAYSTACK_SECRET_KEY before anything is
+   * trusted. A webhook is only ever a *trigger* to re-verify server-side — the
+   * event payload itself is never treated as proof of payment.
+   */
+  webhook: publicProcedure
+    .input(z.object({ rawBody: z.string(), signature: z.string().nullable() }))
+    .mutation(async ({ input }) => {
+      const valid = await paystack.verifyWebhookSignature(input.rawBody, input.signature);
+      if (!valid) throw new TRPCError({ code: "UNAUTHORIZED", message: "Invalid webhook signature" });
+      let event: { event?: string; data?: { reference?: string } };
+      try {
+        event = JSON.parse(input.rawBody);
+      } catch {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Malformed webhook body" });
+      }
+      const reference = event.data?.reference;
+      if (!reference) return { ok: true, ignored: true };
+      const record = await q.getPaymentByReference(reference);
+      if (!record) return { ok: true, ignored: true };
+      if (event.event === "charge.success") {
+        // Re-verify independently — never trust the event body alone.
+        const result = await paystack.verify(reference);
+        if (result.status === "success") {
+          await q.markPaymentVerified(reference, String(result.id ?? ""));
+          await q.createNotification(record.businessId, { type: "PAYMENT", title: "Payment successful", message: `Reference ${reference}`, link: "/app/finance" });
+        }
+      } else if (event.event === "charge.failed") {
+        await q.markPaymentFailed(reference);
+        await q.createNotification(record.businessId, { type: "PAYMENT_FAILED", title: "Payment failed", message: `Reference ${reference}`, link: "/app/finance" });
+      }
+      return { ok: true };
+    }),
+});
+
+// ── Subscriptions ────────────────────────────────────────────────────────────
+const subscriptionRouter = router({
+  current: protectedProcedure.input(bizInput).query(async ({ ctx, input }) => {
+    await assertMember(ctx.user.id, input.businessId);
+    return q.getSubscription(input.businessId);
+  }),
+  change: protectedProcedure
+    .input(bizInput.extend({ plan: z.enum(["FREE", "STARTER", "BUSINESS", "ENTERPRISE"]), billingPeriod: z.enum(["MONTHLY", "ANNUAL"]).default("MONTHLY"), amount: z.number().int().min(0) }))
+    .mutation(async ({ ctx, input }) => {
+      await assertOwnerOrAdmin(ctx.user.id, input.businessId);
+      const row = await q.setSubscription(input.businessId, { plan: input.plan, billingPeriod: input.billingPeriod, amount: input.amount });
+      await q.logAudit(input.businessId, ctx.user.id, "SUBSCRIPTION_CHANGED", "subscription", row.id, { plan: input.plan });
+      return row;
+    }),
+});
+
+// ── Support ──────────────────────────────────────────────────────────────────
+const supportRouter = router({
+  submit: publicProcedure
+    .input(z.object({ name: z.string().optional(), email: z.string().optional(), subject: z.string().min(1), message: z.string().min(1) }))
+    .mutation(async ({ input }) => {
+      const row = await q.createSupportRequest(input);
+      return { ok: true, id: row.id };
+    }),
+});
+
+// ── Platform admin (super admin) ─────────────────────────────────────────────
+const adminRouter = router({
+  stats: adminProcedure.query(() => q.platformStats()),
+  businesses: adminProcedure.query(() => q.listAllBusinesses()),
+  users: adminProcedure.query(() => q.listAllUsers()),
+  subscriptions: adminProcedure.query(() => q.listAllSubscriptions()),
+  payments: adminProcedure.query(() => q.listAllPayments()),
+  auditLogs: adminProcedure.query(() => q.listAllAuditLogs()),
+  support: adminProcedure.query(() => q.listSupportRequests()),
+  settings: adminProcedure.query(() => q.getPlatformSettings()),
+  setBusinessStatus: adminProcedure
+    .input(z.object({ businessId: z.uuid(), status: z.enum(["ACTIVE", "SUSPENDED", "TRIAL"]) }))
+    .mutation(({ input }) => q.setBusinessStatus(input.businessId, input.status)),
+  updateSupportStatus: adminProcedure
+    .input(z.object({ id: z.uuid(), status: z.enum(["OPEN", "IN_PROGRESS", "CLOSED"]) }))
+    .mutation(({ input }) => q.updateSupportStatus(input.id, input.status)),
+  setSetting: adminProcedure
+    .input(z.object({ key: z.string().min(1), value: z.string() }))
+    .mutation(({ input }) => q.setPlatformSetting(input.key, input.value)),
+});
+
+// ── Files (uploads) ──────────────────────────────────────────────────────────
 export function sanitizeBasename(name: string): string {
-  // Split on "\\" too: it cannot steer a path segment (the key joins on "/"),
-  // but a Windows path would otherwise fold its directories into the stem.
   const last = name.split(/[/\\]/).pop() ?? "";
-  // `> 0`, not `>= 0`: in ".gitignore" the dot is a dotfile prefix, not an
-  // extension separator, so the whole name is the stem.
   const dot = last.lastIndexOf(".");
   const rawStem = dot > 0 ? last.slice(0, dot) : last;
   const rawExt = dot > 0 ? last.slice(dot + 1) : "";
-  const stem =
-    rawStem.replace(/[^A-Za-z0-9._-]/g, "").replace(/^\.+/, "") || "upload";
-  // No dots or separators in an extension, and capped — the key is
-  // `${uuid}-${basename}`, so a long tail buys nothing.
+  const stem = rawStem.replace(/[^A-Za-z0-9._-]/g, "").replace(/^\.+/, "") || "upload";
   const ext = rawExt.replace(/[^A-Za-z0-9]/g, "").slice(0, 10);
   return ext ? `${stem}.${ext}` : stem;
 }
 
-// Example file-upload router. The three-step protocol matters: the browser PUTs
-// straight to object storage, so the server only learns the upload succeeded when
-// the client calls `commit`. Skipping commit leaves an unindexed orphan object —
-// never a row pointing at nothing.
-//
-//   1. uploadUrl  → signed PUT URL + the key to commit later
-//   2. browser    → PUT the bytes to uploadUrl
-//   3. commit     → index it (size/type are read back from storage)
 const filesRouter = router({
   uploadUrl: protectedProcedure
     .input(z.object({ name: z.string().min(1), contentType: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
-      // The uuid prefix makes the key unguessable ONLY if the rest of the key
-      // isn't attacker-controlled — sanitizeBasename strips the client-supplied
-      // `name` down to a safe basename first, so it can't steer path segments
-      // (e.g. "/../report.pdf") into someone else's key.
       const key = `${crypto.randomUUID()}-${sanitizeBasename(input.name)}`;
       try {
-        const { uploadUrl, publicPath } = await storagePutUrl(key, input.contentType, {
-          ownerId: ctx.user.id,
-        });
+        const { uploadUrl, publicPath } = await storagePutUrl(key, input.contentType, { ownerId: ctx.user.id });
         return { key, uploadUrl, publicPath };
       } catch (e) {
         if (e instanceof StorageError && e.code === "failed") {
-          throw new TRPCError({
-            code: "BAD_REQUEST",
-            message:
-              "upload rejected by storage — check contentType is on the platform's whitelist " +
-              "(see AGENT.md: png/jpeg/gif/webp/avif, pdf, text/plain, csv, json, mpeg/wav audio, mp4/webm video)",
-          });
+          throw new TRPCError({ code: "BAD_REQUEST", message: "upload rejected by storage — check the file type is allowed" });
         }
         throw e;
       }
     }),
-
   commit: protectedProcedure
     .input(z.object({ key: z.string().min(1), name: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
       try {
         return await storageCommit(input.key, { ownerId: ctx.user.id, name: input.name });
       } catch (e) {
-        if (e instanceof StorageError && e.code === "not_found") {
-          throw new TRPCError({ code: "NOT_FOUND", message: "upload not found — did the PUT succeed?" });
-        }
-        if (e instanceof StorageError && e.code === "forbidden") {
-          throw new TRPCError({ code: "FORBIDDEN", message: "that key belongs to another user" });
-        }
+        if (e instanceof StorageError && e.code === "not_found") throw new TRPCError({ code: "NOT_FOUND", message: "upload not found" });
+        if (e instanceof StorageError && e.code === "forbidden") throw new TRPCError({ code: "FORBIDDEN", message: "that key belongs to another user" });
         throw e;
       }
     }),
-
   list: protectedProcedure.query(({ ctx }) => storageListByOwner(ctx.user.id)),
-
   remove: protectedProcedure
     .input(z.object({ key: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
       try {
         return await storageDeleteOwned(ctx.user.id, input.key);
       } catch (e) {
-        if (e instanceof StorageError && e.code === "forbidden") {
-          throw new TRPCError({ code: "BAD_REQUEST", message: "malformed key" });
-        }
+        if (e instanceof StorageError && e.code === "forbidden") throw new TRPCError({ code: "BAD_REQUEST", message: "malformed key" });
         throw e;
       }
     }),
@@ -162,7 +863,23 @@ const filesRouter = router({
 
 export const appRouter = router({
   auth: authRouter,
-  items: itemsRouter,
+  business: businessRouter,
+  branch: branchRouter,
+  category: categoryRouter,
+  supplier: supplierRouter,
+  customer: customerRouter,
+  product: productRouter,
+  sale: saleRouter,
+  purchase: purchaseRouter,
+  expense: expenseRouter,
+  order: orderRouter,
+  employee: employeeRouter,
+  notification: notificationRouter,
+  dashboard: dashboardRouter,
+  payment: paymentRouter,
+  subscription: subscriptionRouter,
+  support: supportRouter,
+  admin: adminRouter,
   files: filesRouter,
 });
 
