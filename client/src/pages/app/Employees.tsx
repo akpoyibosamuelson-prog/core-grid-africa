@@ -49,7 +49,12 @@ export default function Employees() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Employees & Staff" description="Team records and role-based access" actions={isOwnerOrAdmin && <Button onClick={() => { setForm(EMPTY); setOpen(true); }}><Plus className="h-4 w-4" /> Add employee</Button>} />
+      <PageHeader
+        title="Employees & Staff"
+        description="Team records and role-based access"
+        help="Add the people who work with you and choose what each one is allowed to see and do. A cashier can record sales without seeing your profit or staff records."
+        actions={isOwnerOrAdmin && <Button onClick={() => { setForm(EMPTY); setOpen(true); }}><Plus className="h-4 w-4" /> Add employee</Button>}
+      />
 
       <div className="rounded-xl border border-border bg-card">
         <div className="flex items-center gap-2 border-b border-border p-5">

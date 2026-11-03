@@ -62,6 +62,7 @@ export default function Sales() {
       <PageHeader
         title="Sales"
         description="Every sale, payment and receipt"
+        help="A complete list of what you have sold. Open any sale to print or download its receipt, or to record a refund. Cancelling a sale puts the stock back."
         actions={<>
           <Button variant="outline" onClick={exportCsv} disabled={rows.length === 0}><Download className="h-4 w-4" /> Export CSV</Button>
           <Button asChild><Link to="/app/pos"><Plus className="h-4 w-4" /> New sale</Link></Button>

@@ -32,7 +32,12 @@ export default function Notifications() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Notifications" description="Alerts about sales, stock, orders and payments" actions={unread > 0 && <Button variant="outline" onClick={() => markAll.mutate({ businessId: bizId })} disabled={markAll.isPending}><CheckCheck className="h-4 w-4" /> Mark all read</Button>} />
+      <PageHeader
+        title="Notifications"
+        description="Alerts about sales, stock, orders and payments"
+        help="Automatic warnings: stock running low, products finished, customers overdue, payments received or failed. Clear them once you have dealt with them."
+        actions={unread > 0 && <Button variant="outline" onClick={() => markAll.mutate({ businessId: bizId })} disabled={markAll.isPending}><CheckCheck className="h-4 w-4" /> Mark all read</Button>}
+      />
 
       {list.isLoading ? <LoadingState /> : list.isError ? <ErrorState message={list.error.message} onRetry={() => list.refetch()} /> : rows.length === 0 ? (
         <EmptyState icon={<Bell className="h-6 w-6" />} title="No notifications" description="You'll see alerts here when sales, stock or payments need your attention." />

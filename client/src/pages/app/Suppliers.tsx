@@ -46,7 +46,12 @@ export default function Suppliers() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Suppliers" description="Your supplier registry and outstanding balances" actions={can("suppliers") && <Button onClick={() => { setForm(EMPTY); setOpen(true); }}><Plus className="h-4 w-4" /> Add supplier</Button>} />
+      <PageHeader
+        title="Suppliers"
+        description="Your supplier registry and outstanding balances"
+        help="The businesses you buy stock from. Keep their contact details here and see at a glance how much you still owe each one."
+        actions={can("suppliers") && <Button onClick={() => { setForm(EMPTY); setOpen(true); }}><Plus className="h-4 w-4" /> Add supplier</Button>}
+      />
 
       <SearchInput value={search} onChange={(v) => { setSearch(v); setPage(1); }} placeholder="Search suppliers…" className="w-full sm:w-80" />
 

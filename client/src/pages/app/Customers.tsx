@@ -51,7 +51,12 @@ export default function Customers() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Customers" description="Profiles, purchase history and outstanding balances" actions={can("customers") && <Button onClick={() => { setForm(EMPTY); setOpen(true); }}><Plus className="h-4 w-4" /> Add customer</Button>} />
+      <PageHeader
+        title="Customers"
+        description="Profiles, purchase history and outstanding balances"
+        help="Everyone who buys from you. Open a customer to see what they have bought and whether they still owe you money."
+        actions={can("customers") && <Button onClick={() => { setForm(EMPTY); setOpen(true); }}><Plus className="h-4 w-4" /> Add customer</Button>}
+      />
 
       <div className="grid gap-4 sm:grid-cols-3">
         <StatCard label="Customers" value={String(rows.length)} icon={<Users className="h-4 w-4" />} />

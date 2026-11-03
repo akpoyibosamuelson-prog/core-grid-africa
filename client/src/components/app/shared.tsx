@@ -1,19 +1,75 @@
-import type { ReactNode } from "react";
-import { AlertCircle, Inbox, Loader2, Search } from "lucide-react";
+import { useState, type ReactNode } from "react";
+import { Link } from "wouter";
+import { AlertCircle, ArrowRight, Inbox, Info, Loader2, Search, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog } from "@/components/ui/dialog";
 import { formatMoney, toKobo, toNaira } from "@shared/format";
 
-export function PageHeader({ title, description, actions }: { title: string; description?: string; actions?: ReactNode }) {
+export function PageHeader({ title, description, actions, help }: { title: string; description?: string; actions?: ReactNode; help?: string }) {
   return (
-    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-      <div>
+    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+      <div className="min-w-0">
         <h1 className="text-2xl font-bold tracking-tight text-navy">{title}</h1>
         {description && <p className="mt-1 text-sm text-muted-foreground">{description}</p>}
+        {help && (
+          <p className="mt-2 flex items-start gap-1.5 rounded-lg bg-accent/60 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
+            <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
+            <span>{help}</span>
+          </p>
+        )}
       </div>
       {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
+    </div>
+  );
+}
+
+/**
+ * A short "what is this page for / what do I do first" panel.
+ * Shown at the top of a page so a first-time user is never guessing.
+ */
+export function PageIntro({
+  what,
+  first,
+  to,
+  toLabel,
+  dismissKey,
+}: {
+  what: string;
+  first?: string;
+  to?: string;
+  toLabel?: string;
+  dismissKey?: string;
+}) {
+  const [hidden, setHidden] = useState(false);
+  if (hidden) return null;
+  return (
+    <div className="flex items-start gap-3 rounded-xl border border-primary/20 bg-accent/50 p-4">
+      <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
+        <Info className="h-4 w-4" />
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="text-sm leading-relaxed text-foreground">{what}</p>
+        {first && <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{first}</p>}
+        {to && toLabel && (
+          <Link to={to} className="mt-2 inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline">
+            {toLabel} <ArrowRight className="h-3.5 w-3.5" />
+          </Link>
+        )}
+      </div>
+      {dismissKey && (
+        <button
+          onClick={() => {
+            setHidden(true);
+            try { window.localStorage.setItem(dismissKey, "1"); } catch { /* ignore */ }
+          }}
+          className="shrink-0 rounded p-1 text-muted-foreground hover:bg-background"
+          aria-label="Hide this tip"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      )}
     </div>
   );
 }

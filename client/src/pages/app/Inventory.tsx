@@ -62,6 +62,7 @@ export default function Inventory() {
       <PageHeader
         title="Inventory"
         description="Products, stock levels and movement history"
+        help="This is your product list and how many of each you have. Sales reduce the count and purchases increase it automatically. Set a minimum level and the app warns you before you run out."
         actions={can("inventory") && <Button onClick={() => { setForm(EMPTY); setOpen(true); }}><Plus className="h-4 w-4" /> Add product</Button>}
       />
 

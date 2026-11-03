@@ -2,7 +2,8 @@ import { useState } from "react";
 import { Link } from "wouter";
 import {
   TrendingUp, TrendingDown, Wallet, ShoppingCart, Boxes, Users, AlertTriangle,
-  ArrowRight, Package, Receipt, BarChart3, Plus,
+  ArrowRight, Package, Receipt, BarChart3, Plus, Monitor, HandCoins, LineChart,
+  Sparkles, FileText, Settings, X,
 } from "lucide-react";
 import { PageHeader, StatCard, LoadingState, ErrorState, EmptyState } from "@/components/app/shared";
 import { BarChart, DonutChart } from "@/components/charts/Charts";
@@ -15,11 +16,73 @@ import { useBusiness } from "@/hooks/useBusiness";
 import { DATE_FILTERS } from "@shared/constants";
 import { formatMoney, formatMoneyShort, formatDate } from "@shared/format";
 
+const AREAS = [
+  { to: "/app/pos", label: "POS", icon: Monitor, what: "Ring up a sale at the counter. Stock and profit update by themselves." },
+  { to: "/app/sales", label: "Sales", icon: ShoppingCart, what: "Every sale you have ever recorded, with receipts and refunds." },
+  { to: "/app/inventory", label: "Inventory", icon: Boxes, what: "Your products, how many you have, and what is running low." },
+  { to: "/app/purchases", label: "Purchases", icon: Package, what: "Stock you bought from suppliers. Receiving it adds to inventory." },
+  { to: "/app/expenses", label: "Expenses", icon: Wallet, what: "Money going out — rent, salaries, transport, fuel and more." },
+  { to: "/app/finance", label: "Finance", icon: BarChart3, what: "Your profit and loss, cash flow and what you are owed." },
+  { to: "/app/debts", label: "Debts", icon: HandCoins, what: "Who owes you money, and which supplier bills you still owe." },
+  { to: "/app/customers", label: "Customers", icon: Users, what: "Your buyers, their history and their outstanding balance." },
+  { to: "/app/analytics", label: "Analytics", icon: LineChart, what: "How the business is really performing, period by period." },
+  { to: "/app/advisor", label: "AI Advisor", icon: Sparkles, what: "A health score and practical advice based on your own numbers." },
+  { to: "/app/reports", label: "Reports", icon: FileText, what: "Downloadable PDF and Excel reports for records or a lender." },
+  { to: "/app/settings", label: "Settings", icon: Settings, what: "Business details, currency, tax, staff and your plan." },
+];
+
+function WelcomePanel({ businessName, onDismiss }: { businessName: string; onDismiss: () => void }) {
+  return (
+    <div className="rounded-xl border border-primary/20 bg-card p-5 shadow-sm sm:p-6">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-semibold text-navy">Welcome to {businessName}</h2>
+          <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+            This is your business home page. It shows the real numbers from what you have recorded — nothing is
+            made up. Here is what each area does, in plain English:
+          </p>
+        </div>
+        <button onClick={onDismiss} className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted" aria-label="Hide guide">
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+      <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+        {AREAS.map((a) => {
+          const Icon = a.icon;
+          return (
+            <Link
+              key={a.to}
+              to={a.to}
+              className="group flex items-start gap-2.5 rounded-lg border border-border bg-background px-3 py-2.5 transition-colors hover:border-primary/30 hover:bg-accent"
+            >
+              <Icon className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-navy">{a.label}</p>
+                <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">{a.what}</p>
+              </div>
+            </Link>
+          );
+        })}
+      </div>
+      <div className="mt-4 flex flex-wrap items-center gap-2 rounded-lg bg-accent/60 px-3 py-2.5">
+        <p className="text-xs font-medium text-foreground">Not sure where to start?</p>
+        <Link to="/app/inventory" className="text-xs font-semibold text-primary hover:underline">
+          Add your products first →
+        </Link>
+        <span className="text-xs text-muted-foreground">then record a sale in POS.</span>
+      </div>
+    </div>
+  );
+}
+
 export default function Overview() {
   const { active } = useBusiness();
   const [filter, setFilter] = useState("today");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
+  const [showGuide, setShowGuide] = useState(() => {
+    try { return window.localStorage.getItem("cga.overview.guide") !== "1"; } catch { return true; }
+  });
   const sym = active?.currencySymbol ?? "₦";
 
   const q = trpc.dashboard.stats.useQuery(
@@ -38,9 +101,20 @@ export default function Overview() {
 
   return (
     <div className="space-y-6">
+      {showGuide && (
+        <WelcomePanel
+          businessName={active.businessName}
+          onDismiss={() => {
+            setShowGuide(false);
+            try { window.localStorage.setItem("cga.overview.guide", "1"); } catch { /* ignore */ }
+          }}
+        />
+      )}
+
       <PageHeader
         title="Business Overview"
         description={`${active.businessName} · ${formatDate(d.range.from)} – ${formatDate(d.range.to)}`}
+        help="These figures come straight from the sales, purchases and expenses you have recorded. Change the date filter to look at a different period."
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <Select value={filter} onChange={(e) => setFilter(e.target.value)} className="w-40">
@@ -149,9 +223,14 @@ export default function Overview() {
 
       {s.salesCount === 0 && s.expenseCount === 0 && (
         <EmptyState
-          title="Your dashboard is ready"
-          description="Record your first sale or add products to your inventory and your real numbers will appear here."
-          action={<Button asChild><Link to="/app/pos">Record your first sale</Link></Button>}
+          title="Your dashboard is ready — it just needs your first records"
+          description="Nothing has been recorded yet, so every figure above is zero. Add your products, then record a sale in POS, and this page will fill up with your real numbers."
+          action={
+            <div className="flex flex-wrap justify-center gap-2">
+              <Button asChild><Link to="/app/inventory">Add your first product</Link></Button>
+              <Button asChild variant="outline"><Link to="/app/pos">Record a sale</Link></Button>
+            </div>
+          }
         />
       )}
     </div>

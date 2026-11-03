@@ -50,6 +50,7 @@ export default function Reports() {
       <PageHeader
         title="Reports & Analytics"
         description={`Business performance · ${formatDate(d.range.from)} – ${formatDate(d.range.to)}`}
+        help="Downloadable summaries of your business for any period — useful for your own records, for a bank or for an investor. Choose a period, then export as PDF or Excel."
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <Select value={filter} onChange={(e) => setFilter(e.target.value)} className="w-40">

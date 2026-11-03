@@ -57,7 +57,12 @@ export default function Expenses() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Expenses" description="Every cost your business incurs" actions={<>
+      <PageHeader
+        title="Expenses"
+        description="Every cost your business incurs"
+        help="Record money going out — rent, electricity, transport, salaries, data, marketing. These are subtracted from your profit automatically, so log them as they happen."
+        actions={<>
+
         <Button variant="outline" onClick={exportCsv} disabled={rows.length === 0}><Download className="h-4 w-4" /> Export CSV</Button>
         {can("expenses") && <Button onClick={() => { setForm(EMPTY); setOpen(true); }}><Plus className="h-4 w-4" /> Add expense</Button>}
       </>} />

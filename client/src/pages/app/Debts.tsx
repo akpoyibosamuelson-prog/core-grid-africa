@@ -139,6 +139,7 @@ export default function Debts() {
       <PageHeader
         title="Debts"
         description="Who owes you, and whom you owe — with overdue ageing."
+        help="Receivables are money customers still owe you. Payables are bills you still owe suppliers. Anything past its due date is flagged in red so you can chase it."
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <Button variant="outline" size="sm" onClick={exportCsvFile}><Download className="h-4 w-4" /> CSV</Button>

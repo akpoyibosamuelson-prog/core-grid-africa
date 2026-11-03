@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { Link, useLocation } from "wouter";
-import { Menu, X, ArrowRight } from "lucide-react";
+import { Menu, X, ArrowRight, ShieldCheck } from "lucide-react";
 import { Logo } from "@/components/brand/Logo";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/_core/useAuth";
@@ -47,11 +47,20 @@ export function PublicLayout({ children }: { children: ReactNode }) {
 
           <div className="hidden items-center gap-2 lg:flex">
             {user ? (
-              <Button asChild>
-                <Link to="/app">
-                  Go to dashboard <ArrowRight className="h-4 w-4" />
-                </Link>
-              </Button>
+              <>
+                {user.role === "admin" && (
+                  <Button asChild variant="outline">
+                    <Link to="/admin">
+                      <ShieldCheck className="h-4 w-4" /> Control panel
+                    </Link>
+                  </Button>
+                )}
+                <Button asChild>
+                  <Link to="/app">
+                    Go to dashboard <ArrowRight className="h-4 w-4" />
+                  </Link>
+                </Button>
+              </>
             ) : (
               <>
                 <Button asChild variant="ghost">
@@ -92,11 +101,20 @@ export function PublicLayout({ children }: { children: ReactNode }) {
               ))}
               <div className="mt-2 flex flex-col gap-2 border-t border-border pt-3">
                 {user ? (
-                  <Button asChild>
-                    <Link to="/app" onClick={() => setOpen(false)}>
-                      Go to dashboard
-                    </Link>
-                  </Button>
+                  <>
+                    {user.role === "admin" && (
+                      <Button asChild variant="outline">
+                        <Link to="/admin" onClick={() => setOpen(false)}>
+                          Control panel
+                        </Link>
+                      </Button>
+                    )}
+                    <Button asChild>
+                      <Link to="/app" onClick={() => setOpen(false)}>
+                        Go to dashboard
+                      </Link>
+                    </Button>
+                  </>
                 ) : (
                   <>
                     <Button asChild variant="outline">
@@ -147,7 +165,8 @@ export function PublicLayout({ children }: { children: ReactNode }) {
               <ul className="mt-4 space-y-2.5 text-sm">
                 <li><Link to="/about" className="hover:text-white">About</Link></li>
                 <li><Link to="/contact" className="hover:text-white">Contact</Link></li>
-                <li><Link to="/login" className="hover:text-white">Log in</Link></li>
+                <li><Link to="/login" className="hover:text-white">Business sign in</Link></li>
+                <li><Link to="/login" className="hover:text-white">Owner control panel</Link></li>
               </ul>
             </div>
 

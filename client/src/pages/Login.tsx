@@ -41,7 +41,10 @@ export default function Login() {
           <Card>
             <CardHeader>
               <CardTitle>Welcome back</CardTitle>
-              <CardDescription>Log in to your Core Grid Africa account.</CardDescription>
+              <CardDescription>
+                Sign in to your Core Grid Africa workspace. Business owners and staff land in the business app;
+                the platform owner lands in the control panel.
+              </CardDescription>
             </CardHeader>
             <CardContent>
               <form onSubmit={onSubmit} className="space-y-4">
@@ -64,10 +67,19 @@ export default function Login() {
                   Create one free
                 </Link>
               </p>
+              <div className="mt-4 rounded-lg border border-border bg-muted/40 px-3 py-2.5">
+                <p className="text-xs font-semibold text-navy">Platform owner?</p>
+                <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
+                  Sign in with the owner account above and you will be taken straight to the Core Grid Africa
+                  control panel. Access is verified on the server, so a normal business account cannot open it.
+                </p>
+              </div>
             </CardContent>
           </Card>
           <p className="mt-6 text-center text-xs text-muted-foreground">
             <Link to="/" className="hover:text-foreground">← Back to home</Link>
+            <span className="mx-2">·</span>
+            <Link to="/pricing" className="hover:text-foreground">Pricing</Link>
           </p>
         </div>
       </div>

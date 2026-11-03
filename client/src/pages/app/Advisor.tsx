@@ -88,6 +88,7 @@ export default function Advisor() {
       <PageHeader
         title="AI Business Advisor"
         description="Grounded in your own records — every figure comes from your data."
+        help="This page reads your sales, expenses, stock and debts, then tells you what is healthy and what to fix first. Nothing here is generic advice — it is calculated from your own numbers."
         actions={
           <Badge variant={status.data?.configured ? "success" : "muted"} className="gap-1">
             <ShieldCheck className="h-3.5 w-3.5" />

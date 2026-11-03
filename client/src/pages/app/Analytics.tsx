@@ -156,6 +156,7 @@ export default function Analytics() {
       <PageHeader
         title="Analytics"
         description={`Business intelligence · ${periodLabel}`}
+        help="Use this page to see how the business is really doing: what you earned, what you kept, and which products and customers drive it. Pick a period at the top to compare."
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <Select value={filter} onChange={(e) => setFilter(e.target.value)} className="w-40">

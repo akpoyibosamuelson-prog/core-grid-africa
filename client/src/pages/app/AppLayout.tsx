@@ -15,23 +15,23 @@ import { cn } from "@/lib/utils";
 import { initials } from "@shared/format";
 
 const NAV = [
-  { key: "overview", href: "/app", label: "Overview", icon: LayoutDashboard },
-  { key: "sales", href: "/app/sales", label: "Sales", icon: ShoppingCart },
-  { key: "pos", href: "/app/pos", label: "POS", icon: Monitor },
-  { key: "inventory", href: "/app/inventory", label: "Inventory", icon: Boxes },
-  { key: "purchases", href: "/app/purchases", label: "Purchases", icon: Package },
-  { key: "orders", href: "/app/orders", label: "Orders", icon: Truck },
-  { key: "customers", href: "/app/customers", label: "Customers", icon: Users },
-  { key: "suppliers", href: "/app/suppliers", label: "Suppliers", icon: Factory },
-  { key: "expenses", href: "/app/expenses", label: "Expenses", icon: Wallet },
-  { key: "finance", href: "/app/finance", label: "Finance", icon: BarChart3 },
-  { key: "employees", href: "/app/employees", label: "Employees", icon: UserCog },
-  { key: "reports", href: "/app/reports", label: "Reports", icon: FileText },
-  { key: "analytics", href: "/app/analytics", label: "Analytics", icon: LineChart },
-  { key: "advisor", href: "/app/advisor", label: "AI Advisor", icon: Sparkles },
-  { key: "debts", href: "/app/debts", label: "Debts", icon: HandCoins },
-  { key: "notifications", href: "/app/notifications", label: "Notifications", icon: Bell },
-  { key: "settings", href: "/app/settings", label: "Settings", icon: Settings },
+  { key: "overview", href: "/app", label: "Overview", icon: LayoutDashboard, hint: "Your business at a glance" },
+  { key: "sales", href: "/app/sales", label: "Sales", icon: ShoppingCart, hint: "Every sale and receipt" },
+  { key: "pos", href: "/app/pos", label: "POS (Sell)", icon: Monitor, hint: "Record a sale at the counter" },
+  { key: "inventory", href: "/app/inventory", label: "Inventory", icon: Boxes, hint: "Products and stock levels" },
+  { key: "purchases", href: "/app/purchases", label: "Purchases", icon: Package, hint: "Stock bought from suppliers" },
+  { key: "orders", href: "/app/orders", label: "Orders", icon: Truck, hint: "Orders and deliveries" },
+  { key: "customers", href: "/app/customers", label: "Customers", icon: Users, hint: "Your buyers and what they owe" },
+  { key: "suppliers", href: "/app/suppliers", label: "Suppliers", icon: Factory, hint: "Who you buy from" },
+  { key: "expenses", href: "/app/expenses", label: "Expenses", icon: Wallet, hint: "Money going out" },
+  { key: "finance", href: "/app/finance", label: "Finance", icon: BarChart3, hint: "Profit, loss and cash flow" },
+  { key: "debts", href: "/app/debts", label: "Debts", icon: HandCoins, hint: "Who owes you, whom you owe" },
+  { key: "analytics", href: "/app/analytics", label: "Analytics", icon: LineChart, hint: "How the business is performing" },
+  { key: "advisor", href: "/app/advisor", label: "AI Advisor", icon: Sparkles, hint: "Health score and advice" },
+  { key: "reports", href: "/app/reports", label: "Reports", icon: FileText, hint: "Downloadable PDF and Excel" },
+  { key: "employees", href: "/app/employees", label: "Employees", icon: UserCog, hint: "Staff and permissions" },
+  { key: "notifications", href: "/app/notifications", label: "Notifications", icon: Bell, hint: "Alerts that need attention" },
+  { key: "settings", href: "/app/settings", label: "Settings", icon: Settings, hint: "Business details and plan" },
 ];
 
 export default function AppLayout({ children }: { children: ReactNode }) {
@@ -67,6 +67,8 @@ export default function AppLayout({ children }: { children: ReactNode }) {
               key={n.key}
               to={n.href}
               onClick={() => setMobileOpen(false)}
+              title={n.hint}
+              aria-label={`${n.label} — ${n.hint}`}
               className={cn(
                 "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
                 activeItem ? "bg-primary text-white" : "text-white/70 hover:bg-white/10 hover:text-white",
@@ -82,6 +84,15 @@ export default function AppLayout({ children }: { children: ReactNode }) {
         })}
       </nav>
       <div className="border-t border-white/10 p-3">
+        {user?.role === "admin" && (
+          <Link
+            to="/admin"
+            onClick={() => setMobileOpen(false)}
+            className="mb-2 flex items-center gap-2 rounded-lg border border-[#8FB0FF]/30 bg-[#8FB0FF]/10 px-3 py-2.5 text-sm font-semibold text-white hover:bg-[#8FB0FF]/20"
+          >
+            <ShieldCheck className="h-4 w-4" /> Control panel
+          </Link>
+        )}
         <div className="rounded-lg bg-white/5 p-3">
           <p className="text-xs font-medium text-white/60">Current plan</p>
           <p className="mt-0.5 text-sm font-semibold text-white">{active?.plan ?? "FREE"}</p>
@@ -180,8 +191,8 @@ export default function AppLayout({ children }: { children: ReactNode }) {
                       <Settings className="h-4 w-4" /> Settings
                     </Link>
                     {user?.role === "admin" && (
-                      <Link to="/admin" onClick={() => setUserOpen(false)} className="flex items-center gap-2 rounded-md px-3 py-2 text-sm hover:bg-muted">
-                        <ShieldCheck className="h-4 w-4" /> Super admin
+                      <Link to="/admin" onClick={() => setUserOpen(false)} className="flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-primary hover:bg-muted">
+                        <ShieldCheck className="h-4 w-4" /> Control panel (super admin)
                       </Link>
                     )}
                     <button onClick={() => { setUserOpen(false); void logout(); }} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-destructive hover:bg-muted">

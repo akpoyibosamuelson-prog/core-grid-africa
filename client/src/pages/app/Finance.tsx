@@ -56,6 +56,7 @@ export default function Finance() {
       <PageHeader
         title="Financial Management"
         description={`Profit & loss · ${formatDate(d.range.from)} – ${formatDate(d.range.to)}`}
+        help="Revenue is what you sold. Gross profit is revenue minus the cost of those goods. Net profit is what is left after expenses too. Cash collected is money actually received — it can differ from revenue when customers buy on credit."
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <Select value={filter} onChange={(e) => setFilter(e.target.value)} className="w-40">

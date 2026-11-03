@@ -32,7 +32,12 @@ export default function Branches() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Branches" description="Manage your business locations" actions={isOwnerOrAdmin && <Button onClick={() => setOpen(true)} disabled={atLimit}><Plus className="h-4 w-4" /> Add branch</Button>} />
+      <PageHeader
+        title="Branches"
+        description="Manage your business locations"
+        help="A branch is a shop, store or office. Each branch keeps its own stock and sales, and staff can be limited to the branch they work in."
+        actions={isOwnerOrAdmin && <Button onClick={() => setOpen(true)} disabled={atLimit}><Plus className="h-4 w-4" /> Add branch</Button>}
+      />
 
       {atLimit && (
         <div className="rounded-xl border border-warning/30 bg-warning/5 p-4 text-sm">

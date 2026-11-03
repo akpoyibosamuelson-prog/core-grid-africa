@@ -39,11 +39,12 @@ export default function Home() {
                 <Zap className="mr-1.5 h-3 w-3" /> Digital Infrastructure for Growing Businesses
               </Badge>
               <h1 className="mt-5 text-4xl font-bold leading-[1.1] tracking-tight text-white sm:text-5xl lg:text-6xl">
-                Run your entire business from one place.
+                Run your business.<br />Know your profit.
               </h1>
-              <p className="mt-5 max-w-xl text-lg leading-relaxed text-white/70">
-                Core Grid Africa brings sales, inventory, purchases, expenses, finance, customers and staff
-                together — built for Nigerian retailers, wholesalers, distributors and entrepreneurs.
+              <p className="mt-5 max-w-xl text-lg leading-relaxed text-white/75">
+                Core Grid Africa is one simple app that records your sales, tracks your stock and shows you
+                exactly how much money you are making — built for Nigerian shops, wholesalers, distributors
+                and entrepreneurs.
               </p>
               <div className="mt-8 flex flex-wrap gap-3">
                 <Button asChild size="lg" className="bg-white text-navy hover:bg-white/90">
@@ -52,10 +53,13 @@ export default function Home() {
                   </Link>
                 </Button>
                 <Button asChild size="lg" variant="outline" className="border-white/30 bg-transparent text-white hover:bg-white/10 hover:text-white">
-                  <Link to="/features">See all features</Link>
+                  <a href="#how-it-works">See how it works</a>
+                </Button>
+                <Button asChild size="lg" variant="ghost" className="text-white hover:bg-white/10 hover:text-white">
+                  <Link to="/login">Sign in</Link>
                 </Button>
               </div>
-              <p className="mt-5 text-sm text-white/50">
+              <p className="mt-5 text-sm text-white/55">
                 No card required · Free plan forever · Set up in minutes
               </p>
             </div>
@@ -116,12 +120,45 @@ export default function Home() {
         </div>
       </div>
 
+      {/* Plain-English explainer */}
+      <Section className="pb-0">
+        <div className="rounded-2xl border border-border bg-card p-6 shadow-sm sm:p-10">
+          <div className="grid gap-8 lg:grid-cols-[1.1fr_1fr] lg:items-center">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-primary">In plain English</p>
+              <h2 className="mt-3 text-2xl font-bold tracking-tight text-navy sm:text-3xl">
+                What does Core Grid Africa actually do for you?
+              </h2>
+              <p className="mt-4 text-base leading-relaxed text-muted-foreground">
+                Think of it as your business's record book, calculator and adviser in one place. Every time you
+                sell something, the app reduces your stock, records the money and works out your profit
+                automatically. At the end of the day you can see what you sold, what you spent, who still owes
+                you and how much you truly made &mdash; without a single spreadsheet.
+              </p>
+            </div>
+            <div className="space-y-3">
+              {[
+                { q: "I sell goods in a shop", a: "Record each sale in seconds and your stock count updates itself." },
+                { q: "I buy from suppliers", a: "Log a purchase and your stock goes up; unpaid bills are tracked for you." },
+                { q: "I give customers credit", a: "See exactly who owes you, how much, and how long it is overdue." },
+                { q: "I want to grow", a: "Get a health score and clear, practical advice based on your own numbers." },
+              ].map((r) => (
+                <div key={r.q} className="rounded-lg border border-border bg-background px-4 py-3">
+                  <p className="text-sm font-semibold text-navy">&ldquo;{r.q}&rdquo;</p>
+                  <p className="mt-1 text-sm text-muted-foreground">{r.a}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </Section>
+
       {/* Modules */}
       <Section>
         <SectionHeading
           eyebrow="Everything in one platform"
           title="One system for your whole operation"
-          subtitle="Stop juggling notebooks, spreadsheets and separate apps. Core Grid Africa connects every part of your business so the numbers always agree."
+          subtitle="Stop juggling notebooks, spreadsheets and separate apps. Core Grid Africa connects every part of your business, so when you record a sale the stock, the money and the profit all update together \u2014 and the numbers always agree."
         />
         <div className="mt-12 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
           {MODULES.map((m) => (
@@ -133,11 +170,11 @@ export default function Home() {
       </Section>
 
       {/* How it works */}
-      <Section className="bg-card">
+      <Section className="bg-card" id="how-it-works">
         <SectionHeading
           eyebrow="How it works"
           title="Up and running in three steps"
-          subtitle="No consultants, no long onboarding. Register your business and start recording real transactions the same day."
+          subtitle="No consultants, no long training. Register your business today and start recording real transactions the same day \u2014 in plain English, on your phone or laptop."
         />
         <div className="mt-12 grid gap-6 md:grid-cols-3">
           {STEPS.map((s) => (
@@ -158,7 +195,7 @@ export default function Home() {
               align="left"
               eyebrow="Built to be trusted"
               title="Your business data stays yours"
-              subtitle="Every record is scoped to your business. One business can never see another's data — enforced on the server, not just hidden in the interface."
+              subtitle="Your records belong to your business only. Another company using Core Grid Africa can never see your customers, sales or money — and that is enforced on the server, not just hidden in the screen."
             />
             <ul className="mt-8 space-y-4">
               {[
@@ -193,6 +230,48 @@ export default function Home() {
         </div>
       </Section>
 
+      {/* Two ways in */}
+      <Section className="bg-card">
+        <SectionHeading
+          eyebrow="Getting in"
+          title="Two doors, one platform"
+          subtitle="Businesses sign in to their own workspace. The platform owner signs in to the control panel that runs Core Grid Africa itself."
+        />
+        <div className="mt-10 grid gap-5 md:grid-cols-2">
+          <div className="rounded-xl border border-border bg-background p-6">
+            <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-accent text-primary">
+              <Store className="h-5 w-5" />
+            </div>
+            <h3 className="mt-4 text-lg font-semibold text-navy">For business owners &amp; staff</h3>
+            <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+              Sign in to record sales, manage stock, track expenses and see your profit. New here? Create a free
+              account and register your business in a couple of minutes.
+            </p>
+            <div className="mt-5 flex flex-wrap gap-2">
+              <Button asChild><Link to="/login">Business sign in</Link></Button>
+              <Button asChild variant="outline"><Link to="/register">Create free account</Link></Button>
+            </div>
+          </div>
+          <div className="rounded-xl border border-border bg-background p-6">
+            <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-navy text-white">
+              <ShieldCheck className="h-5 w-5" />
+            </div>
+            <h3 className="mt-4 text-lg font-semibold text-navy">For the platform owner</h3>
+            <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+              The Core Grid Africa control panel manages every registered business, user, subscription and
+              payment on the platform. It is restricted to the platform owner account and checked on the server
+              on every request.
+            </p>
+            <div className="mt-5 flex flex-wrap gap-2">
+              <Button asChild variant="outline"><Link to="/login">Owner sign in</Link></Button>
+            </div>
+            <p className="mt-3 text-xs text-muted-foreground">
+              Signing in with the owner account takes you straight to the control panel.
+            </p>
+          </div>
+        </div>
+      </Section>
+
       {/* CTA */}
       <Section className="pb-24">
         <div className="cga-gradient relative overflow-hidden rounded-2xl px-6 py-14 text-center sm:px-12">
@@ -202,7 +281,7 @@ export default function Home() {
               Ready to power your business?
             </h2>
             <p className="mt-4 text-lg text-white/70">
-              Join the businesses building on Core Grid Africa. Start on the free plan — upgrade only when you grow.
+              Start on the free plan and see your real numbers in minutes. Upgrade only when your business grows.
             </p>
             <div className="mt-8 flex flex-wrap justify-center gap-3">
               <Button asChild size="lg" className="bg-white text-navy hover:bg-white/90">

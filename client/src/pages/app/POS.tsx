@@ -85,7 +85,12 @@ export default function POS() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Point of Sale" description="Record a sale — inventory and finances update automatically" actions={<Button asChild variant="outline"><Link to="/app/sales"><ArrowLeft className="h-4 w-4" /> Sales history</Link></Button>} />
+      <PageHeader
+        title="Point of Sale"
+        description="Record a sale — inventory and finances update automatically"
+        help="Pick the products the customer is buying, choose how they are paying, then charge. Stock goes down and the money is recorded for you — no separate bookkeeping."
+        actions={<Button asChild variant="outline"><Link to="/app/sales"><ArrowLeft className="h-4 w-4" /> Sales history</Link></Button>}
+      />
 
       <div className="grid gap-6 lg:grid-cols-5">
         <div className="lg:col-span-3">

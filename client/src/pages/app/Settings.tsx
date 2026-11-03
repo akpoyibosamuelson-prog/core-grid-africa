@@ -49,7 +49,11 @@ export default function Settings() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Settings" description="Business profile, categories, subscription and security" />
+      <PageHeader
+        title="Settings"
+        description="Business profile, categories, subscription and security"
+        help="Set up your business details, currency, tax and invoice numbering here. This is also where you manage your plan and change your password."
+      />
 
       <div className="flex flex-wrap gap-2 border-b border-border">
         {TABS.map((t) => {

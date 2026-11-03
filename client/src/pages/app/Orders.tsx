@@ -69,7 +69,12 @@ export default function Orders() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Orders & Deliveries" description="Track every order from pending to delivered" actions={can("orders") && <Button onClick={() => setOpen(true)}><Plus className="h-4 w-4" /> New order</Button>} />
+      <PageHeader
+        title="Orders & Deliveries"
+        description="Track every order from pending to delivered"
+        help="Use orders when a customer asks for goods to be prepared, picked up or delivered later. Move each order along as it progresses so you always know what is outstanding."
+        actions={can("orders") && <Button onClick={() => setOpen(true)}><Plus className="h-4 w-4" /> New order</Button>}
+      />
 
       <Select value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }} className="w-full sm:w-56">
         <option value="">All statuses</option>

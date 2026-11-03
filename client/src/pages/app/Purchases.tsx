@@ -59,7 +59,12 @@ export default function Purchases() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Purchases" description="Purchase orders and supplier stock intake" actions={can("purchases") && <Button onClick={() => setOpen(true)}><Plus className="h-4 w-4" /> New purchase</Button>} />
+      <PageHeader
+        title="Purchases"
+        description="Purchase orders and supplier stock intake"
+        help="Record stock you buy from suppliers. When you mark a purchase as received, the quantities are added to your inventory and any unpaid balance is tracked as money you owe."
+        actions={can("purchases") && <Button onClick={() => setOpen(true)}><Plus className="h-4 w-4" /> New purchase</Button>}
+      />
 
       {list.isLoading ? <LoadingState /> : list.isError ? <ErrorState message={list.error.message} onRetry={() => list.refetch()} /> : rows.length === 0 ? (
         <EmptyState icon={<Package className="h-6 w-6" />} title="No purchases yet" description="Record a purchase from a supplier. Receiving it increases your stock automatically." action={can("purchases") ? <Button onClick={() => setOpen(true)}><Plus className="h-4 w-4" /> New purchase</Button> : undefined} />
