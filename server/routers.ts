@@ -13,6 +13,10 @@ import { compare as bcryptCompare } from "bcryptjs";
 import { activeProvider, providerStatus, ProviderNotConfiguredError, ProviderRequestError } from "./services/payments";
 import { fulfilPayment } from "./services/payments/fulfill";
 import { assertPlatformAdmin } from "./guards";
+import * as analytics from "./analytics";
+import { inventoryIntelligence } from "./inventory-intel";
+import { buildMetrics, computeHealth, recommendations, answerQuestion } from "./advisor";
+import { aiConfigured, aiModel } from "./services/ai";
 
 // ── Membership guard ─────────────────────────────────────────────────────────
 async function assertMember(userId: string, businessId: string, moduleKey?: string) {
@@ -974,6 +978,133 @@ const filesRouter = router({
     }),
 });
 
+// ── Analytics (period intelligence) ──────────────────────────────────────────
+// Every figure is computed from the caller's OWN business rows. The previous
+// period is the immediately preceding window of the SAME length, so a
+// comparison is always like-for-like regardless of which filter is chosen.
+const analyticsRouter = router({
+  overview: protectedProcedure
+    .input(bizInput.extend({ filter: z.string().default("this_month"), from: z.string().optional(), to: z.string().optional() }))
+    .query(async ({ ctx, input }) => {
+      await assertMember(ctx.user.id, input.businessId, "reports");
+      const { resolveDateRange } = await import("../shared/format");
+      const range = resolveDateRange(input.filter, new Date(), { from: input.from, to: input.to });
+      const span = range.to.getTime() - range.from.getTime();
+      const prev = { from: new Date(range.from.getTime() - span - 1), to: new Date(range.from.getTime() - 1) };
+      const [metrics, comparison, series, cash, balances, activity] = await Promise.all([
+        analytics.periodMetrics(input.businessId, range.from, range.to),
+        analytics.comparePeriods(input.businessId, range, prev),
+        analytics.periodSeries(input.businessId, range.from, range.to, "day"),
+        analytics.cashFlowStatement(input.businessId, range.from, range.to),
+        analytics.cashAndBankBalances(input.businessId),
+        analytics.customerActivity(input.businessId, range.from, range.to),
+      ]);
+      return { range: { from: range.from, to: range.to }, metrics, comparison, series, cash, balances, activity };
+    }),
+
+  pnl: protectedProcedure
+    .input(bizInput.extend({ filter: z.string().default("this_month"), from: z.string().optional(), to: z.string().optional() }))
+    .query(async ({ ctx, input }) => {
+      await assertMember(ctx.user.id, input.businessId, "reports");
+      const { resolveDateRange } = await import("../shared/format");
+      const range = resolveDateRange(input.filter, new Date(), { from: input.from, to: input.to });
+      const span = range.to.getTime() - range.from.getTime();
+      const prev = { from: new Date(range.from.getTime() - span - 1), to: new Date(range.from.getTime() - 1) };
+      const [metrics, comparison, unusual] = await Promise.all([
+        analytics.periodMetrics(input.businessId, range.from, range.to),
+        analytics.comparePeriods(input.businessId, range, prev),
+        analytics.unusualExpenses(input.businessId, range.from, range.to),
+      ]);
+      return { range: { from: range.from, to: range.to }, metrics, comparison, unusual };
+    }),
+
+  series: protectedProcedure
+    .input(bizInput.extend({ filter: z.string().default("this_month"), bucket: z.enum(["day", "week", "month"]).default("day"), from: z.string().optional(), to: z.string().optional() }))
+    .query(async ({ ctx, input }) => {
+      await assertMember(ctx.user.id, input.businessId, "reports");
+      const { resolveDateRange } = await import("../shared/format");
+      const range = resolveDateRange(input.filter, new Date(), { from: input.from, to: input.to });
+      return analytics.periodSeries(input.businessId, range.from, range.to, input.bucket);
+    }),
+
+  cashflow: protectedProcedure
+    .input(bizInput.extend({ filter: z.string().default("this_month"), from: z.string().optional(), to: z.string().optional() }))
+    .query(async ({ ctx, input }) => {
+      await assertMember(ctx.user.id, input.businessId, "finance");
+      const { resolveDateRange } = await import("../shared/format");
+      const range = resolveDateRange(input.filter, new Date(), { from: input.from, to: input.to });
+      const [statement, balances] = await Promise.all([
+        analytics.cashFlowStatement(input.businessId, range.from, range.to),
+        analytics.cashAndBankBalances(input.businessId),
+      ]);
+      return { range: { from: range.from, to: range.to }, statement, balances };
+    }),
+
+  customers: protectedProcedure
+    .input(bizInput.extend({ filter: z.string().default("this_month"), from: z.string().optional(), to: z.string().optional() }))
+    .query(async ({ ctx, input }) => {
+      await assertMember(ctx.user.id, input.businessId, "reports");
+      const { resolveDateRange } = await import("../shared/format");
+      const range = resolveDateRange(input.filter, new Date(), { from: input.from, to: input.to });
+      return analytics.customerActivity(input.businessId, range.from, range.to);
+    }),
+
+  inventory: protectedProcedure
+    .input(bizInput.extend({ windowDays: z.number().int().min(7).max(180).default(30) }))
+    .query(async ({ ctx, input }) => {
+      await assertMember(ctx.user.id, input.businessId, "inventory");
+      return inventoryIntelligence(input.businessId, input.windowDays);
+    }),
+});
+
+// ── Debts (receivables & payables) ───────────────────────────────────────────
+const debtsRouter = router({
+  report: protectedProcedure.input(bizInput).query(async ({ ctx, input }) => {
+    await assertMember(ctx.user.id, input.businessId, "finance");
+    return analytics.debtsReport(input.businessId);
+  }),
+});
+
+// ── AI Business Advisor ──────────────────────────────────────────────────────
+// The deterministic engine always answers; the language layer only rewrites it
+// when a key is configured, and `source` says which one produced the answer.
+const advisorRouter = router({
+  status: protectedProcedure.query(() => ({ configured: aiConfigured(), model: aiModel() })),
+
+  health: protectedProcedure.input(bizInput).query(async ({ ctx, input }) => {
+    await assertMember(ctx.user.id, input.businessId, "reports");
+    const metrics = await buildMetrics(input.businessId);
+    return computeHealth(metrics);
+  }),
+
+  recommendations: protectedProcedure.input(bizInput).query(async ({ ctx, input }) => {
+    await assertMember(ctx.user.id, input.businessId, "reports");
+    const metrics = await buildMetrics(input.businessId);
+    return { metrics, recommendations: recommendations(metrics) };
+  }),
+
+  history: protectedProcedure.input(bizInput).query(async ({ ctx, input }) => {
+    await assertMember(ctx.user.id, input.businessId);
+    return q.listAdvisorConversations(input.businessId, 50);
+  }),
+
+  ask: protectedProcedure
+    .input(bizInput.extend({ question: z.string().min(3).max(500) }))
+    .mutation(async ({ ctx, input }) => {
+      await assertMember(ctx.user.id, input.businessId, "reports");
+      const result = await answerQuestion(input.businessId, input.question);
+      await q.createAdvisorConversation(input.businessId, {
+        userId: ctx.user.id,
+        question: input.question,
+        answer: result.answer,
+        topic: result.topic,
+        evidence: result.evidence,
+        source: result.source,
+      });
+      return result;
+    }),
+});
+
 export const appRouter = router({
   auth: authRouter,
   business: businessRouter,
@@ -995,6 +1126,9 @@ export const appRouter = router({
   admin: adminRouter,
   platform: platformRouter,
   files: filesRouter,
+  analytics: analyticsRouter,
+  debts: debtsRouter,
+  advisor: advisorRouter,
 });
 
 export type AppRouter = typeof appRouter;

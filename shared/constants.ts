@@ -46,11 +46,12 @@ export const ROLE_MODULES: Record<MemberRole, string[]> = {
   ADMIN: ["*"],
   MANAGER: [
     "overview", "sales", "pos", "inventory", "purchases", "orders",
-    "customers", "suppliers", "expenses", "finance", "employees", "reports", "notifications", "settings",
+    "customers", "suppliers", "expenses", "finance", "employees", "reports",
+    "analytics", "advisor", "debts", "notifications", "settings",
   ],
   SALES_STAFF: ["overview", "sales", "pos", "orders", "customers", "notifications"],
   INVENTORY_STAFF: ["overview", "inventory", "purchases", "suppliers", "notifications"],
-  ACCOUNTANT: ["overview", "expenses", "finance", "reports", "notifications"],
+  ACCOUNTANT: ["overview", "expenses", "finance", "reports", "analytics", "advisor", "debts", "notifications"],
   EMPLOYEE: ["overview", "notifications"],
 };
 

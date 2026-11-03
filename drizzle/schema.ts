@@ -86,6 +86,14 @@ export const notificationType = pgEnum("notification_type", [
   "PAYMENT",
   "PAYMENT_FAILED",
   "SYSTEM",
+  // ── Intelligence alerts (Phase: AI business intelligence) ──
+  "DEBT_OVERDUE",
+  "SUPPLIER_DUE",
+  "UNUSUAL_EXPENSE",
+  "SALES_DECLINE",
+  "DEMAND_DECLINE",
+  "RESTOCK",
+  "EXPIRY",
 ]);
 
 // ── Businesses & membership ──────────────────────────────────────────────────
@@ -228,6 +236,14 @@ export const products = pgTable(
     retailPrice: bigint("retail_price", { mode: "number" }).notNull().default(0),
     quantity: integer("quantity").notNull().default(0),
     minStockLevel: integer("min_stock_level").notNull().default(0),
+    // ── Inventory intelligence inputs ──
+    // Safety stock is the buffer held above expected demand during lead time.
+    safetyStock: integer("safety_stock").notNull().default(0),
+    // How many days a supplier takes to deliver a reorder. Drives the reorder
+    // point: demand during lead time + safety stock.
+    supplierLeadTimeDays: integer("supplier_lead_time_days").notNull().default(7),
+    // Optional expiry, for perishables and dated stock.
+    expiryDate: timestamp("expiry_date", { withTimezone: true }),
     location: text("location"),
     imageUrl: text("image_url"),
     isActive: boolean("is_active").notNull().default(true),
@@ -286,6 +302,8 @@ export const sales = pgTable(
     paymentStatus: paymentStatus("payment_status").notNull().default("PAID"),
     status: saleStatus("status").notNull().default("COMPLETED"),
     notes: text("notes"),
+    // When an unpaid/partly-paid sale falls due. Drives overdue-debt alerts.
+    dueAt: timestamp("due_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
@@ -331,6 +349,8 @@ export const purchases = pgTable(
     balance: bigint("balance", { mode: "number" }).notNull().default(0),
     status: purchaseStatus("status").notNull().default("DRAFT"),
     notes: text("notes"),
+    // When an unpaid purchase falls due. Drives supplier-payment-deadline alerts.
+    dueAt: timestamp("due_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
@@ -612,6 +632,35 @@ export const platformAdmins = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [uniqueIndex("platform_admins_user_idx").on(t.userId)],
+);
+
+// ── AI Business Advisor ──────────────────────────────────────────────────────
+// One row per question asked of the advisor, with the answer and the evidence
+// snapshot it was grounded in. Business-scoped like every other table, so one
+// business can never read another's consultation history.
+export const advisorConversations = pgTable(
+  "advisor_conversations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    businessId: uuid("business_id")
+      .notNull()
+      .references(() => businesses.id, { onDelete: "cascade" }),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+    question: text("question").notNull(),
+    answer: text("answer").notNull(),
+    // Which topic the question mapped to (revenue, expenses, inventory, …).
+    topic: text("topic"),
+    // The metrics the answer was grounded in, as JSON, for audit and replay.
+    evidence: text("evidence"),
+    // "rules" when answered by the deterministic engine, "llm" when the
+    // optional language model rewrote it. Never claims an LLM ran when it did not.
+    source: text("source").notNull().default("rules"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("advisor_business_idx").on(t.businessId),
+    index("advisor_created_idx").on(t.createdAt),
+  ],
 );
 
 export const supportRequests = pgTable(

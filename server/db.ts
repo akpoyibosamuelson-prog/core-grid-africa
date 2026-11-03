@@ -10,6 +10,7 @@ import {
   employees, expenses, invoices, notifications, orderItems, orders, payments, products,
   purchaseItems, purchases, saleItems, sales, stockMovements, subscriptions, suppliers,
   supportRequests, users, platformAdmins, platformSettings as platformSettingsTable,
+  advisorConversations,
 } from "../drizzle/schema";
 import { planDurationMs, type MemberRole, type PlanBillingPeriod } from "../shared/constants";
 
@@ -233,7 +234,9 @@ export async function listProducts(businessId: string, opts: { search?: string; 
       id: products.id, businessId: products.businessId, categoryId: products.categoryId, supplierId: products.supplierId,
       name: products.name, sku: products.sku, barcode: products.barcode, unit: products.unit,
       costPrice: products.costPrice, wholesalePrice: products.wholesalePrice, retailPrice: products.retailPrice,
-      quantity: products.quantity, minStockLevel: products.minStockLevel, location: products.location,
+      quantity: products.quantity, minStockLevel: products.minStockLevel,
+      safetyStock: products.safetyStock, supplierLeadTimeDays: products.supplierLeadTimeDays, expiryDate: products.expiryDate,
+      location: products.location,
       imageUrl: products.imageUrl, isActive: products.isActive, createdAt: products.createdAt,
       categoryName: categories.name,
     })
@@ -251,6 +254,7 @@ export async function getProduct(businessId: string, id: string) {
 export async function createProduct(businessId: string, input: {
   name: string; categoryId?: string; supplierId?: string; sku?: string; barcode?: string; unit?: string;
   costPrice?: number; wholesalePrice?: number; retailPrice?: number; quantity?: number; minStockLevel?: number;
+  safetyStock?: number; supplierLeadTimeDays?: number; expiryDate?: Date;
   location?: string; imageUrl?: string;
 }) {
   const id = crypto.randomUUID();
@@ -260,7 +264,10 @@ export async function createProduct(businessId: string, input: {
       id, businessId, name: input.name, categoryId: input.categoryId ?? null, supplierId: input.supplierId ?? null,
       sku: input.sku ?? null, barcode: input.barcode ?? null, unit: input.unit ?? "pcs",
       costPrice: input.costPrice ?? 0, wholesalePrice: input.wholesalePrice ?? 0, retailPrice: input.retailPrice ?? 0,
-      quantity: qty, minStockLevel: input.minStockLevel ?? 0, location: input.location ?? null, imageUrl: input.imageUrl ?? null,
+      quantity: qty, minStockLevel: input.minStockLevel ?? 0,
+      safetyStock: input.safetyStock ?? 0, supplierLeadTimeDays: input.supplierLeadTimeDays ?? 7,
+      expiryDate: input.expiryDate ?? null,
+      location: input.location ?? null, imageUrl: input.imageUrl ?? null,
     }).returning(),
     ...(qty > 0
       ? [d.insert(stockMovements).values({ businessId, productId: id, type: "IN", quantity: qty, balanceAfter: qty, reason: "Opening stock" }).returning()]
@@ -766,6 +773,16 @@ export async function createNotification(businessId: string, input: { userId?: s
   return row;
 }
 
+/** True when an UNREAD notification of this type already exists since `since`.
+ *  The daily alert sweep uses it so a repeated run never spams the same warning. */
+export async function hasUnreadNotificationSince(businessId: string, type: string, since: Date) {
+  const [row] = await db
+    .select({ n: count(notifications.id).mapWith(Number) })
+    .from(notifications)
+    .where(and(eq(notifications.businessId, businessId), eq(notifications.type, type as never), eq(notifications.isRead, false), gte(notifications.createdAt, since)));
+  return (row?.n ?? 0) > 0;
+}
+
 // ── Dashboard / analytics ────────────────────────────────────────────────────
 export async function dashboardStats(businessId: string, from: Date, to: Date) {
   const [salesAgg] = await db
@@ -862,6 +879,97 @@ export async function receivablesPayables(businessId: string) {
     .from(purchases)
     .where(and(eq(purchases.businessId, businessId), inArray(purchases.status, ["ORDERED", "RECEIVED"])));
   return { receivables: rec?.total ?? 0, payables: pay?.total ?? 0 };
+}
+
+// ── Debt settlement (partial & full payments) ────────────────────────────────
+// Recording a payment against a sale or purchase updates the balance, the
+// payment status and the invoice in ONE atomic unit, and writes a payment row
+// so the ledger and the cash-flow report both see it. The amount is clamped to
+// the outstanding balance, so a payment can never over-settle a debt.
+
+export async function recordSalePayment(
+  businessId: string,
+  saleId: string,
+  input: { amount: number; method: string; userId: string },
+) {
+  const sale = await getSale(businessId, saleId);
+  if (!sale) throw new Error("Sale not found");
+  if (sale.status !== "COMPLETED") throw new Error("Only completed sales can be paid");
+  const amount = Math.min(input.amount, sale.balance);
+  if (amount <= 0) throw new Error("This sale has nothing outstanding");
+  const newPaid = sale.amountPaid + amount;
+  const newBalance = sale.total - newPaid;
+  const status = newBalance <= 0 ? "PAID" : "PARTIALLY_PAID";
+  await atomic((d) => {
+    const list: unknown[] = [
+      d.update(sales).set({ amountPaid: newPaid, balance: newBalance, paymentStatus: status as never })
+        .where(and(eq(sales.id, saleId), eq(sales.businessId, businessId))).returning(),
+      d.insert(payments).values({
+        businessId, type: "SALE", reference: `${sale.reference}-PAY-${Date.now()}`, saleId, amount,
+        method: input.method as never, status: "SUCCESS", provider: "manual", verifiedAt: new Date(),
+      }).returning(),
+      d.update(invoices).set({ status: status as never })
+        .where(and(eq(invoices.saleId, saleId), eq(invoices.businessId, businessId))).returning(),
+      d.insert(auditLogs).values({
+        businessId, userId: input.userId, action: "SALE_PAYMENT", entity: "sale", entityId: saleId,
+        meta: JSON.stringify({ amount, balance: newBalance }),
+      }).returning(),
+    ];
+    return list as unknown as [never, ...never[]];
+  });
+  return { ok: true, amountPaid: newPaid, balance: newBalance, paymentStatus: status };
+}
+
+export async function recordPurchasePayment(
+  businessId: string,
+  purchaseId: string,
+  input: { amount: number; method: string; userId: string },
+) {
+  const p = await getPurchase(businessId, purchaseId);
+  if (!p) throw new Error("Purchase not found");
+  const amount = Math.min(input.amount, p.balance);
+  if (amount <= 0) throw new Error("This purchase has nothing outstanding");
+  const newPaid = p.amountPaid + amount;
+  const newBalance = p.total - newPaid;
+  await atomic((d) => {
+    const list: unknown[] = [
+      d.update(purchases).set({ amountPaid: newPaid, balance: newBalance })
+        .where(and(eq(purchases.id, purchaseId), eq(purchases.businessId, businessId))).returning(),
+      d.insert(payments).values({
+        businessId, type: "PURCHASE", reference: `${p.reference}-PAY-${Date.now()}`, purchaseId, amount,
+        method: input.method as never, status: "SUCCESS", provider: "manual", verifiedAt: new Date(),
+      }).returning(),
+      d.insert(auditLogs).values({
+        businessId, userId: input.userId, action: "PURCHASE_PAYMENT", entity: "purchase", entityId: purchaseId,
+        meta: JSON.stringify({ amount, balance: newBalance }),
+      }).returning(),
+    ];
+    return list as unknown as [never, ...never[]];
+  });
+  return { ok: true, amountPaid: newPaid, balance: newBalance };
+}
+
+// ── AI Business Advisor history ──────────────────────────────────────────────
+
+export async function createAdvisorConversation(
+  businessId: string,
+  input: { userId?: string; question: string; answer: string; topic?: string; evidence?: unknown; source?: string },
+) {
+  const [row] = await db.insert(advisorConversations).values({
+    businessId, userId: input.userId ?? null, question: input.question, answer: input.answer,
+    topic: input.topic ?? null, evidence: input.evidence ? JSON.stringify(input.evidence) : null,
+    source: input.source ?? "rules",
+  }).returning();
+  return row;
+}
+
+export async function listAdvisorConversations(businessId: string, limit = 50) {
+  return db
+    .select()
+    .from(advisorConversations)
+    .where(eq(advisorConversations.businessId, businessId))
+    .orderBy(desc(advisorConversations.createdAt))
+    .limit(limit);
 }
 
 export async function listPayments(businessId: string, limit = 100) {

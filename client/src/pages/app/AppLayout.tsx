@@ -3,7 +3,7 @@ import { Link, useLocation } from "wouter";
 import {
   LayoutDashboard, ShoppingCart, Monitor, Boxes, Package, Truck, Users, Factory,
   Wallet, BarChart3, UserCog, FileText, Bell, Settings, Building2, Menu, X,
-  LogOut, ChevronDown, Search, ShieldCheck,
+  LogOut, ChevronDown, Search, ShieldCheck, Sparkles, HandCoins, LineChart,
 } from "lucide-react";
 import { Logo, LogoMark } from "@/components/brand/Logo";
 import { Button } from "@/components/ui/button";
@@ -27,6 +27,9 @@ const NAV = [
   { key: "finance", href: "/app/finance", label: "Finance", icon: BarChart3 },
   { key: "employees", href: "/app/employees", label: "Employees", icon: UserCog },
   { key: "reports", href: "/app/reports", label: "Reports", icon: FileText },
+  { key: "analytics", href: "/app/analytics", label: "Analytics", icon: LineChart },
+  { key: "advisor", href: "/app/advisor", label: "AI Advisor", icon: Sparkles },
+  { key: "debts", href: "/app/debts", label: "Debts", icon: HandCoins },
   { key: "notifications", href: "/app/notifications", label: "Notifications", icon: Bell },
   { key: "settings", href: "/app/settings", label: "Settings", icon: Settings },
 ];

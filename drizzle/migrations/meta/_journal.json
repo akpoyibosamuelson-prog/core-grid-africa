@@ -22,6 +22,13 @@
       "when": 1793719352377,
       "tag": "0002_platform_owner_seed",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1793733599921,
+      "tag": "0003_swift_tag",
+      "breakpoints": true
     }
   ]
 }

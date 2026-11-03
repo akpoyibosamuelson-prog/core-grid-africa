@@ -30,6 +30,9 @@ import Expenses from "./pages/app/Expenses";
 import Finance from "./pages/app/Finance";
 import Employees from "./pages/app/Employees";
 import Reports from "./pages/app/Reports";
+import Analytics from "./pages/app/Analytics";
+import Advisor from "./pages/app/Advisor";
+import Debts from "./pages/app/Debts";
 import Notifications from "./pages/app/Notifications";
 import Settings from "./pages/app/Settings";
 import Branches from "./pages/app/Branches";
@@ -146,6 +149,27 @@ export default function App() {
           <Protected>
             <AppLayout>
               <Reports />
+            </AppLayout>
+          </Protected>
+        </Route>
+        <Route path="/app/analytics">
+          <Protected>
+            <AppLayout>
+              <Analytics />
+            </AppLayout>
+          </Protected>
+        </Route>
+        <Route path="/app/advisor">
+          <Protected>
+            <AppLayout>
+              <Advisor />
+            </AppLayout>
+          </Protected>
+        </Route>
+        <Route path="/app/debts">
+          <Protected>
+            <AppLayout>
+              <Debts />
             </AppLayout>
           </Protected>
         </Route>
