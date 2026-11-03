@@ -9,8 +9,8 @@ import { Badge } from "@/components/ui/badge";
 import { trpc } from "@/_core/trpc";
 import { useBusiness } from "@/hooks/useBusiness";
 import { useToast } from "@/components/ui/toast";
-import { PLANS, EXPENSE_CATEGORIES } from "@shared/constants";
-import { formatMoney } from "@shared/format";
+import { EXPENSE_CATEGORIES } from "@shared/constants";
+import SubscriptionPanel from "@/components/app/SubscriptionPanel";
 import { cn } from "@/lib/utils";
 
 const TABS = [
@@ -27,7 +27,6 @@ export default function Settings() {
   const bizId = active?.businessId ?? "";
 
   const current = trpc.business.current.useQuery({ businessId: bizId }, { enabled: !!active });
-  const sub = trpc.subscription.current.useQuery({ businessId: bizId }, { enabled: !!active });
   const cats = trpc.category.list.useQuery({ businessId: bizId }, { enabled: !!active });
   const utils = trpc.useUtils();
 
@@ -44,7 +43,6 @@ export default function Settings() {
   const createCat = trpc.category.create.useMutation({ onSuccess: () => { push({ kind: "success", title: "Category added" }); setNewCat({ name: "", kind: "PRODUCT" }); void utils.category.list.invalidate(); }, onError: (e) => push({ kind: "error", title: "Could not add", message: e.message }) });
   const [catToDelete, setCatToDelete] = useState<{ id: string; name: string } | null>(null);
   const deleteCat = trpc.category.remove.useMutation({ onSuccess: () => { push({ kind: "success", title: "Category removed" }); setCatToDelete(null); void utils.category.list.invalidate(); }, onError: (e) => push({ kind: "error", title: "Could not remove", message: e.message }) });
-  const changePlan = trpc.subscription.change.useMutation({ onSuccess: () => { push({ kind: "success", title: "Plan updated" }); void utils.subscription.current.invalidate(); }, onError: (e) => push({ kind: "error", title: "Could not change plan", message: e.message }) });
 
   if (!active) return null;
   if (current.isLoading) return <LoadingState />;
@@ -113,51 +111,14 @@ export default function Settings() {
         </div>
       )}
 
-      {tab === "subscription" && (
-        <div className="space-y-4">
-          <div className="rounded-xl border border-border bg-card p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">Current plan</p>
-                <p className="text-2xl font-bold text-navy">{sub.data?.plan ?? active.plan}</p>
-              </div>
-              <Badge variant="primary">{sub.data?.status ?? "ACTIVE"}</Badge>
-            </div>
-            {sub.data?.expiresAt && <p className="mt-2 text-xs text-muted-foreground">Renews {new Date(sub.data.expiresAt).toLocaleDateString()}</p>}
-          </div>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {PLANS.map((p) => {
-              const isCurrent = (sub.data?.plan ?? active.plan) === p.tier;
-              return (
-                <div key={p.tier} className={cn("flex flex-col rounded-xl border bg-card p-5", isCurrent ? "border-primary ring-1 ring-primary" : "border-border")}>
-                  <div className="flex items-center justify-between">
-                    <h3 className="font-semibold text-navy">{p.name}</h3>
-                    {isCurrent && <Badge variant="primary">Current</Badge>}
-                  </div>
-                  <p className="mt-2 text-2xl font-bold text-navy">{p.monthly === 0 ? "Free" : formatMoney(p.monthly, "₦")}<span className="text-sm font-normal text-muted-foreground">{p.monthly > 0 ? "/mo" : ""}</span></p>
-                  <p className="mt-1 text-xs text-muted-foreground">{p.tagline}</p>
-                  <ul className="mt-3 flex-1 space-y-1.5">
-                    {p.features.map((f) => <li key={f} className="flex items-start gap-2 text-xs text-muted-foreground"><Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-success" /> {f}</li>)}
-                  </ul>
-                  {isOwnerOrAdmin && !isCurrent && (
-                    <Button variant="outline" size="sm" className="mt-4" onClick={() => changePlan.mutate({ businessId: bizId, plan: p.tier, billingPeriod: "MONTHLY", amount: p.monthly })} disabled={changePlan.isPending}>
-                      Switch to {p.name}
-                    </Button>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-          <p className="text-xs text-muted-foreground">Paid plans are activated through Paystack. Switching here records your plan; complete payment from the Finance page to activate a paid tier.</p>
-        </div>
-      )}
+      {tab === "subscription" && <SubscriptionPanel businessId={bizId} isOwnerOrAdmin={isOwnerOrAdmin} />}
 
       {tab === "security" && (
         <div className="max-w-2xl space-y-4">
           <div className="rounded-xl border border-border bg-card p-6">
             <h3 className="flex items-center gap-2 font-semibold text-navy"><Shield className="h-4 w-4 text-primary" /> Security & data isolation</h3>
             <ul className="mt-3 space-y-2 text-sm text-muted-foreground">
-              <li className="flex items-start gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0 text-success" /> Passwords are hashed with scrypt — never stored in plain text.</li>
+              <li className="flex items-start gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0 text-success" /> Passwords are hashed with bcrypt — never stored in plain text.</li>
               <li className="flex items-start gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0 text-success" /> Every request is scoped to your business — data cannot leak between businesses.</li>
               <li className="flex items-start gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0 text-success" /> Role-based permissions control which modules each team member can access.</li>
               <li className="flex items-start gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0 text-success" /> Sensitive actions are written to an audit log.</li>

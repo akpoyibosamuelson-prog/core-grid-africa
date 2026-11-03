@@ -126,6 +126,44 @@ export const PLANS = [
   },
 ] as const;
 
+// ── Plan pricing, authoritative on the SERVER ────────────────────────────────
+// The browser may ASK for a plan; it may never name a price. Every amount that
+// reaches a payment provider is resolved here, from the tier + billing period,
+// so a tampered request cannot buy Business for ₦1. The pricing page and the
+// settings UI read these same values for display, which is exactly what keeps
+// what the owner sees and what they are charged in agreement.
+
+export type PlanTier = (typeof PLANS)[number]["tier"];
+export type PlanBillingPeriod = "MONTHLY" | "ANNUAL";
+
+export const PLAN_KEYS = PLANS.map((p) => p.tier) as readonly PlanTier[];
+
+export function isPlanTier(value: string): value is PlanTier {
+  return (PLAN_KEYS as readonly string[]).includes(value);
+}
+
+/** Amount in kobo for a tier + period. Returns null for an unknown tier. */
+export function planPrice(tier: string, period: PlanBillingPeriod): number | null {
+  const plan = PLANS.find((p) => p.tier === tier);
+  if (!plan) return null;
+  return period === "ANNUAL" ? plan.annual : plan.monthly;
+}
+
+/** True when the tier costs nothing and therefore needs no payment record. */
+export function planIsFree(tier: string): boolean {
+  return tier === "FREE";
+}
+
+/** How long a paid subscription runs for before it must be renewed. */
+export function planDurationMs(period: PlanBillingPeriod): number {
+  const days = period === "ANNUAL" ? 365 : 30;
+  return days * 24 * 60 * 60 * 1000;
+}
+
+export function planLabel(tier: string): string {
+  return PLANS.find((p) => p.tier === tier)?.name ?? tier;
+}
+
 export const EXPENSE_CATEGORIES = [
   "Rent",
   "Electricity",

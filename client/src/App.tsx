@@ -13,6 +13,7 @@ import Privacy from "./pages/Privacy";
 import Terms from "./pages/Terms";
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
+import Account from "./pages/Account";
 
 // Business app
 import AppLayout from "./pages/app/AppLayout";
@@ -59,6 +60,11 @@ export default function App() {
         <Route path="/terms" component={Terms} />
         <Route path="/login" component={Login} />
         <Route path="/register" component={Signup} />
+        <Route path="/account">
+          <Protected>
+            <Account />
+          </Protected>
+        </Route>
 
         {/* Business app */}
         <Route path="/app/onboarding">

@@ -399,11 +399,23 @@ export const payments = pgTable(
     provider: text("provider"), // paystack | manual
     providerRef: text("provider_ref"),
     verifiedAt: timestamp("verified_at", { withTimezone: true }),
+    // ── Subscription billing (online payments only) ─────────────────────
+    // What this transaction is buying. Null for SALE/PURCHASE records, which
+    // are settled in-app rather than through a payment provider.
+    plan: text("plan"), // FREE | STARTER | BUSINESS | ENTERPRISE
+    billingPeriod: billingPeriod("billing_period"), // MONTHLY | ANNUAL
+    // Why a provider transaction ended as FAILED / ABANDONED — shown to the
+    // owner and to the platform admin, so a failure is never a bare status.
+    failureReason: text("failure_reason"),
+    // Provider-side detail (channel, gateway response, raw verification) kept
+    // as JSON text for audit. Never contains card data.
+    providerMeta: text("provider_meta"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     index("payments_business_idx").on(t.businessId),
     uniqueIndex("payments_reference_idx").on(t.reference),
+    index("payments_status_provider_idx").on(t.status, t.provider),
   ],
 );
 
@@ -570,6 +582,37 @@ export const platformSettings = pgTable("platform_settings", {
   value: text("value"),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+/**
+ * Platform-level administrators (Core Grid Africa staff).
+ *
+ * The AUTHORISATION gate is `users.role === 'admin'`, enforced server-side by
+ * `adminProcedure` in server/_core/trpc.ts — hiding a menu item is never the
+ * protection. This table carries the platform-side profile for an account that
+ * already has that role: their phone number, whether they are the founding
+ * platform owner, and whether an administrator-issued password still has to be
+ * changed.
+ *
+ * `mustChangePassword` is set when an account is bootstrapped with a password
+ * somebody else chose. It is cleared the first time the holder changes it.
+ */
+export const platformAdmins = pgTable(
+  "platform_admins",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    phone: text("phone"),
+    title: text("title").notNull().default("Platform Administrator"),
+    isPlatformOwner: boolean("is_platform_owner").notNull().default(false),
+    mustChangePassword: boolean("must_change_password").notNull().default(true),
+    lastPasswordChangeAt: timestamp("last_password_change_at", { withTimezone: true }),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("platform_admins_user_idx").on(t.userId)],
+);
 
 export const supportRequests = pgTable(
   "support_requests",

@@ -3,14 +3,15 @@
 // businessId that the router resolved from the caller's membership — that is the
 // isolation boundary. Money is integer kobo throughout.
 import { and, asc, count, desc, eq, gte, ilike, inArray, lte, or, sql, sum } from "drizzle-orm";
+import { hash as bcryptHash } from "bcryptjs";
 import { atomic, db } from "./_core/db";
 import {
   auditLogs, branches, businessMembers, businesses, categories, customers, deliveries,
   employees, expenses, invoices, notifications, orderItems, orders, payments, products,
   purchaseItems, purchases, saleItems, sales, stockMovements, subscriptions, suppliers,
-  supportRequests, users, platformSettings as platformSettingsTable,
+  supportRequests, users, platformAdmins, platformSettings as platformSettingsTable,
 } from "../drizzle/schema";
-import type { MemberRole } from "../shared/constants";
+import { planDurationMs, type MemberRole, type PlanBillingPeriod } from "../shared/constants";
 
 // ── Membership / business context ────────────────────────────────────────────
 
@@ -1015,11 +1016,13 @@ export async function setPlatformSetting(key: string, value: string) {
 export async function createPaymentRecord(input: {
   businessId: string; type: string; reference: string; amount: number; method: string;
   status: string; provider: string; providerRef?: string; saleId?: string;
+  plan?: string; billingPeriod?: PlanBillingPeriod;
 }) {
   const [row] = await db.insert(payments).values({
     businessId: input.businessId, type: input.type as never, reference: input.reference, amount: input.amount,
     method: input.method as never, status: input.status as never, provider: input.provider,
     providerRef: input.providerRef ?? null, saleId: input.saleId ?? null,
+    plan: input.plan ?? null, billingPeriod: (input.billingPeriod ?? null) as never,
   }).returning();
   return row;
 }
@@ -1029,18 +1032,180 @@ export async function getPaymentByReference(reference: string) {
   return row ?? null;
 }
 
-export async function markPaymentVerified(reference: string, providerRef: string) {
+export async function getPaymentById(businessId: string, id: string) {
+  const [row] = await db
+    .select()
+    .from(payments)
+    .where(and(eq(payments.id, id), eq(payments.businessId, businessId)))
+    .limit(1);
+  return row ?? null;
+}
+
+/**
+ * PENDING → SUCCESS, once. Returns the updated row, or null when the reference
+ * was already settled (or does not exist). The caller treats null as "already
+ * handled" — never as an error to retry. This guarded transition is what makes
+ * duplicate payment impossible: two concurrent verifications of the same
+ * reference cannot both update a PENDING row.
+ */
+export async function markPaymentVerified(reference: string, providerRef: string, meta?: unknown) {
   const [row] = await db
     .update(payments)
-    .set({ status: "SUCCESS", providerRef, verifiedAt: new Date() })
+    .set({
+      status: "SUCCESS",
+      providerRef,
+      verifiedAt: new Date(),
+      failureReason: null,
+      providerMeta: meta ? JSON.stringify(meta) : null,
+    })
     .where(and(eq(payments.reference, reference), eq(payments.status, "PENDING")))
     .returning();
   return row ?? null;
 }
 
-export async function markPaymentFailed(reference: string) {
-  const [row] = await db.update(payments).set({ status: "FAILED" }).where(eq(payments.reference, reference)).returning();
+/** PENDING → FAILED. Guarded the same way, so a settled payment is never
+ *  downgraded by a late failure webhook. */
+export async function markPaymentFailed(reference: string, reason?: string, meta?: unknown) {
+  const [row] = await db
+    .update(payments)
+    .set({
+      status: "FAILED",
+      failureReason: reason ?? null,
+      providerMeta: meta ? JSON.stringify(meta) : null,
+    })
+    .where(and(eq(payments.reference, reference), eq(payments.status, "PENDING")))
+    .returning();
   return row ?? null;
+}
+
+/** PENDING → ABANDONED (customer left checkout without paying). */
+export async function markPaymentAbandoned(reference: string, reason?: string) {
+  const [row] = await db
+    .update(payments)
+    .set({ status: "ABANDONED", failureReason: reason ?? null })
+    .where(and(eq(payments.reference, reference), eq(payments.status, "PENDING")))
+    .returning();
+  return row ?? null;
+}
+
+/** Business-scoped payment history, newest first, optionally filtered. */
+export async function listPaymentsDetailed(
+  businessId: string,
+  opts: { status?: string; type?: string; limit?: number } = {},
+) {
+  const conds = [eq(payments.businessId, businessId)];
+  if (opts.status) conds.push(eq(payments.status, opts.status as never));
+  if (opts.type) conds.push(eq(payments.type, opts.type as never));
+  return db
+    .select()
+    .from(payments)
+    .where(and(...conds))
+    .orderBy(desc(payments.createdAt))
+    .limit(opts.limit ?? 100);
+}
+
+/** Provider transactions still PENDING — the reconciliation job's work list. */
+export async function listPendingProviderPayments(olderThanMs = 0) {
+  const cutoff = new Date(Date.now() - olderThanMs);
+  return db
+    .select()
+    .from(payments)
+    .where(
+      and(
+        eq(payments.status, "PENDING"),
+        sql`${payments.provider} is not null`,
+        lte(payments.createdAt, cutoff),
+      ),
+    )
+    .orderBy(asc(payments.createdAt))
+    .limit(100);
+}
+
+/**
+ * Activate a paid subscription: record it and move the business onto the plan,
+ * in ONE atomic unit. Called only after a provider verification has succeeded
+ * AND the settled amount has been checked against our own record.
+ */
+export async function activateSubscription(
+  businessId: string,
+  input: { plan: string; billingPeriod: PlanBillingPeriod; amount: number; providerRef?: string },
+) {
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + planDurationMs(input.billingPeriod));
+  const [subRows] = await atomic((d) => [
+    d
+      .insert(subscriptions)
+      .values({
+        businessId,
+        plan: input.plan as never,
+        billingPeriod: input.billingPeriod as never,
+        amount: input.amount,
+        status: "ACTIVE" as never,
+        providerRef: input.providerRef ?? null,
+        startedAt: now,
+        expiresAt,
+      })
+      .returning(),
+    d.update(businesses).set({ plan: input.plan as never }).where(eq(businesses.id, businessId)).returning(),
+  ]);
+  const sub = (subRows as unknown as { id: string }[])[0];
+  return { subscription: sub, expiresAt };
+}
+
+// ── Platform administrators ───────────────────────────────────────────────────
+// Authorisation is `users.role === 'admin'` (enforced by adminProcedure). These
+// rows carry the platform-side profile for such an account.
+
+export async function getPlatformAdminByUserId(userId: string) {
+  const [row] = await db.select().from(platformAdmins).where(eq(platformAdmins.userId, userId)).limit(1);
+  return row ?? null;
+}
+
+export async function listPlatformAdmins() {
+  return db
+    .select({
+      id: platformAdmins.id,
+      userId: platformAdmins.userId,
+      phone: platformAdmins.phone,
+      title: platformAdmins.title,
+      isPlatformOwner: platformAdmins.isPlatformOwner,
+      mustChangePassword: platformAdmins.mustChangePassword,
+      lastPasswordChangeAt: platformAdmins.lastPasswordChangeAt,
+      createdAt: platformAdmins.createdAt,
+      email: users.email,
+      name: users.name,
+      role: users.role,
+    })
+    .from(platformAdmins)
+    .innerJoin(users, eq(users.id, platformAdmins.userId))
+    .orderBy(desc(platformAdmins.isPlatformOwner), asc(platformAdmins.createdAt));
+}
+
+/**
+ * Change a user's password. The hash is computed here, never accepted from the
+ * caller, and the platform-admin flag is cleared in the same unit so "must
+ * change password" cannot survive the change it was waiting for.
+ */
+export async function setUserPassword(userId: string, newPassword: string) {
+  const passwordHash = await bcryptHash(newPassword, 10);
+  const now = new Date();
+  const [userRows] = await atomic((d) => [
+    d.update(users).set({ passwordHash }).where(eq(users.id, userId)).returning(),
+    d
+      .update(platformAdmins)
+      .set({ mustChangePassword: false, lastPasswordChangeAt: now })
+      .where(eq(platformAdmins.userId, userId))
+      .returning(),
+  ]);
+  const user = (userRows as unknown as { id: string }[])[0];
+  return user ?? null;
+}
+
+/** Current password hash for a user — used to verify the old password before a
+ *  change. Kept here so the auth layer's own column stays untouched. */
+export async function getUserPasswordHash(userId: string) {
+  const [row] = await db.select({ passwordHash: users.passwordHash }).from(users).where(eq(users.id, userId)).limit(1);
+  return row?.passwordHash ?? null;
 }
 
 export type { MemberRole };

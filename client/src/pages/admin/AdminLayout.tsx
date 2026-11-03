@@ -2,6 +2,7 @@ import { type ReactNode } from "react";
 import { Link, useLocation } from "wouter";
 import { LayoutDashboard, Building2, Users, CreditCard, Receipt, LifeBuoy, ScrollText, Settings, ArrowLeft, ShieldCheck } from "lucide-react";
 import { Logo } from "@/components/brand/Logo";
+import AdminGuard from "@/components/admin/AdminGuard";
 import { cn } from "@/lib/utils";
 
 const NAV = [
@@ -18,6 +19,7 @@ const NAV = [
 export default function AdminLayout({ children }: { children: ReactNode }) {
   const [location] = useLocation();
   return (
+    <AdminGuard>
     <div className="flex min-h-screen bg-background">
       <aside className="hidden w-64 shrink-0 lg:block">
         <div className="fixed inset-y-0 left-0 flex w-64 flex-col bg-navy text-white/80">
@@ -52,5 +54,6 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
         <main className="flex-1 p-4 sm:p-6">{children}</main>
       </div>
     </div>
+    </AdminGuard>
   );
 }

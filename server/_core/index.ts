@@ -8,6 +8,8 @@ import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveAppStorage } from "./storage";
 import { getJob } from "./jobs";
+import "../jobs"; // registers the payment reconciliation job at startup
+import { registerPaymentWebhook } from "../routes/payment-webhook";
 import { mountClient } from "./serve";
 import { env } from "./env";
 
@@ -27,6 +29,10 @@ app.use(
 
 // Scoped per-app file storage (DESIGN §5.6): 307 → short-lived signed S3 URL.
 app.all("/app-storage/*", (c) => serveAppStorage(c));
+
+// Provider payment webhook (Paystack). Raw-body HMAC verification happens
+// inside the handler — see server/routes/payment-webhook.ts.
+registerPaymentWebhook(app);
 
 // Platform-signed scheduled-job callback (DESIGN §8.4). The body runs in THIS
 // app's runtime; the platform only triggers on schedule. Until the platform

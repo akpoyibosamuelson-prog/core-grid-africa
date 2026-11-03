@@ -27,7 +27,9 @@ export default function Login() {
     }
   }
 
-  if (user) return <Redirect to="/app" />;
+  // Platform administrators land in the super admin dashboard; everyone else
+  // goes to their business dashboard.
+  if (user) return <Redirect to={user.role === "admin" ? "/admin" : "/app"} />;
 
   return (
     <div className="flex min-h-screen flex-col bg-background">

@@ -3,13 +3,16 @@
 // (the isolation boundary), then call server/db.ts. Auth comes from _core.
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { router, publicProcedure, protectedProcedure, adminProcedure } from "./_core/trpc";
+import { router, publicProcedure, protectedProcedure } from "./_core/trpc";
 import { authProvider, registerLocalUser, AuthError, EmailTakenError } from "./_core/auth";
 import { storageCommit, storageDeleteOwned, storageListByOwner, storagePutUrl, StorageError } from "./_core/storage";
 import * as q from "./db";
-import { roleCanAccess, type MemberRole } from "../shared/constants";
+import { roleCanAccess, planPrice, planIsFree, type MemberRole } from "../shared/constants";
 import { slugify } from "../shared/format";
-import { paystack } from "./services/paystack";
+import { compare as bcryptCompare } from "bcryptjs";
+import { activeProvider, providerStatus, ProviderNotConfiguredError, ProviderRequestError } from "./services/payments";
+import { fulfilPayment } from "./services/payments/fulfill";
+import { assertPlatformAdmin } from "./guards";
 
 // ── Membership guard ─────────────────────────────────────────────────────────
 async function assertMember(userId: string, businessId: string, moduleKey?: string) {
@@ -28,6 +31,16 @@ async function assertOwnerOrAdmin(userId: string, businessId: string) {
   }
   return m;
 }
+
+/**
+ * Platform-administrator gate. `adminProcedure` already checks the session's
+ * role; this re-reads it from the DATABASE so a revoked role takes effect at
+ * once and a stale token cannot claim admin. Every /admin procedure uses it.
+ */
+const platformAdminProcedure = protectedProcedure.use(async ({ ctx, next }) => {
+  await assertPlatformAdmin(ctx.user);
+  return next({ ctx });
+});
 
 const bizInput = z.object({ businessId: z.uuid() });
 
@@ -63,6 +76,22 @@ const authRouter = router({
     await authProvider().logout(ctx.c);
     return { ok: true };
   }),
+
+  /**
+   * Change the signed-in user's own password. The current password is verified
+   * first, and the new hash is computed server-side — never accepted from the
+   * client. Clears the platform-admin "must change password" flag.
+   */
+  changePassword: protectedProcedure
+    .input(z.object({ currentPassword: z.string().min(1), newPassword: z.string().min(8) }))
+    .mutation(async ({ ctx, input }) => {
+      const hash = await q.getUserPasswordHash(ctx.user.id);
+      if (!hash) throw new TRPCError({ code: "BAD_REQUEST", message: "This account has no password to change." });
+      const ok = await bcryptCompare(input.currentPassword, hash);
+      if (!ok) throw new TRPCError({ code: "UNAUTHORIZED", message: "Your current password is incorrect." });
+      await q.setUserPassword(ctx.user.id, input.newPassword);
+      return { ok: true };
+    }),
 });
 
 // ── Business ─────────────────────────────────────────────────────────────────
@@ -689,78 +718,133 @@ const dashboardRouter = router({
   }),
 });
 
-// ── Payments (Paystack) ──────────────────────────────────────────────────────
+// ── Payments (provider-backed) ───────────────────────────────────────────────
+// The browser may ASK for a plan; it may never name a price. Every amount is
+// resolved server-side from the tier + billing period, so a tampered request
+// cannot buy Business for ₦1. A transaction is only ever settled by
+// `fulfilPayment`, which requires an independent provider verification and an
+// exact amount match — never the customer's return from the checkout page.
 const paymentRouter = router({
-  list: protectedProcedure.input(bizInput).query(async ({ ctx, input }) => {
+  /** Provider status for the UI: configured? which keys are missing? */
+  config: protectedProcedure.query(() => providerStatus()),
+
+  history: protectedProcedure.input(bizInput).query(async ({ ctx, input }) => {
     await assertMember(ctx.user.id, input.businessId);
-    return q.listPayments(input.businessId);
+    return q.listPaymentsDetailed(input.businessId, { limit: 100 });
   }),
-  /** Initialize a Paystack transaction. Returns the authorization URL. */
+
+  /**
+   * Start a subscription payment. The amount is derived from the plan, never
+   * taken from the request. When the provider is not configured this throws a
+   * clear PRECONDITION_FAILED naming the missing env vars — it never invents a
+   * successful transaction.
+   */
   initialize: protectedProcedure
-    .input(bizInput.extend({ amount: z.number().int().positive(), email: z.string(), purpose: z.enum(["SALE", "SUBSCRIPTION"]).default("SALE"), plan: z.string().optional(), billingPeriod: z.enum(["MONTHLY", "ANNUAL"]).optional() }))
+    .input(bizInput.extend({
+      plan: z.enum(["FREE", "STARTER", "BUSINESS", "ENTERPRISE"]),
+      billingPeriod: z.enum(["MONTHLY", "ANNUAL"]).default("MONTHLY"),
+    }))
     .mutation(async ({ ctx, input }) => {
-      await assertMember(ctx.user.id, input.businessId);
-      const reference = `CGA-${Date.now()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+      await assertOwnerOrAdmin(ctx.user.id, input.businessId);
+      if (planIsFree(input.plan)) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "The Free plan needs no payment." });
+      }
+      const amount = planPrice(input.plan, input.billingPeriod);
+      if (amount === null) throw new TRPCError({ code: "BAD_REQUEST", message: "Unknown plan." });
+
+      const provider = activeProvider();
+      if (!provider.isConfigured()) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: `Online payments are not configured yet. Add ${provider.missingConfig().join(", ")} in Settings → Environment variables.`,
+        });
+      }
+
+      const reference = `CGA-${Date.now()}-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
       await q.createPaymentRecord({
-        businessId: input.businessId, type: input.purpose, reference, amount: input.amount,
-        method: "ONLINE", status: "PENDING", provider: "paystack",
+        businessId: input.businessId, type: "SUBSCRIPTION", reference, amount,
+        method: "ONLINE", status: "PENDING", provider: provider.id,
+        plan: input.plan, billingPeriod: input.billingPeriod,
       });
-      const result = await paystack.initialize({ email: input.email, amount: input.amount, reference, metadata: { businessId: input.businessId, purpose: input.purpose, plan: input.plan } });
-      return { reference, ...result };
+
+      try {
+        const result = await provider.initialize({
+          email: ctx.user.email,
+          amount,
+          reference,
+          currency: "NGN",
+          metadata: { businessId: input.businessId, plan: input.plan, billingPeriod: input.billingPeriod },
+        });
+        return { reference, amount, authorizationUrl: result.authorizationUrl, publicKey: provider.publicKey() };
+      } catch (e) {
+        // The record stays PENDING; the reconciliation job settles it if the
+        // customer actually paid, and the owner can retry.
+        if (e instanceof ProviderNotConfiguredError) {
+          throw new TRPCError({ code: "PRECONDITION_FAILED", message: e.message });
+        }
+        if (e instanceof ProviderRequestError) {
+          throw new TRPCError({ code: "BAD_GATEWAY", message: e.message });
+        }
+        throw e;
+      }
     }),
-  /** Verify a transaction SERVER-SIDE. Never trust the browser's return. */
+
+  /**
+   * Verify a transaction SERVER-SIDE. The customer returning from checkout is
+   * only a trigger to call this — the browser's word is never proof.
+   */
   verify: protectedProcedure
     .input(bizInput.extend({ reference: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
       await assertMember(ctx.user.id, input.businessId);
       const record = await q.getPaymentByReference(input.reference);
-      if (!record || record.businessId !== input.businessId) throw new TRPCError({ code: "NOT_FOUND", message: "Payment not found" });
-      if (record.status === "SUCCESS") return { status: "SUCCESS", alreadyVerified: true };
-      const result = await paystack.verify(input.reference);
-      if (result.status === "success") {
-        await q.markPaymentVerified(input.reference, String(result.id ?? ""));
-        await q.createNotification(input.businessId, { type: "PAYMENT", title: "Payment successful", message: `Reference ${input.reference}`, link: "/app/finance" });
-        return { status: "SUCCESS", amount: result.amount };
+      if (!record || record.businessId !== input.businessId) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Payment not found." });
       }
-      await q.markPaymentFailed(input.reference);
-      await q.createNotification(input.businessId, { type: "PAYMENT_FAILED", title: "Payment failed", message: `Reference ${input.reference}`, link: "/app/finance" });
-      return { status: "FAILED" };
+      if (record.status === "SUCCESS") return { outcome: "already_settled" as const };
+
+      const provider = activeProvider();
+      if (!provider.isConfigured()) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: `Online payments are not configured yet. Add ${provider.missingConfig().join(", ")} in Settings → Environment variables.`,
+        });
+      }
+      const result = await provider.verify(input.reference);
+      const outcome = await fulfilPayment(input.reference, result);
+      return { outcome: outcome.outcome, reason: outcome.reason, plan: outcome.plan };
     }),
-  config: protectedProcedure.query(() => ({ configured: paystack.isConfigured() })),
 
   /**
-   * Paystack webhook. Public (Paystack calls it), but the HMAC-SHA512 signature
-   * over the raw body is verified against PAYSTACK_SECRET_KEY before anything is
-   * trusted. A webhook is only ever a *trigger* to re-verify server-side — the
-   * event payload itself is never treated as proof of payment.
+   * Provider webhook. Public (the provider calls it), but the HMAC-SHA512
+   * signature over the raw body is verified against the secret key before
+   * anything is trusted. A webhook is only ever a TRIGGER to re-verify
+   * server-side — the event payload is never treated as proof of payment.
    */
   webhook: publicProcedure
     .input(z.object({ rawBody: z.string(), signature: z.string().nullable() }))
     .mutation(async ({ input }) => {
-      const valid = await paystack.verifyWebhookSignature(input.rawBody, input.signature);
-      if (!valid) throw new TRPCError({ code: "UNAUTHORIZED", message: "Invalid webhook signature" });
-      let event: { event?: string; data?: { reference?: string } };
-      try {
-        event = JSON.parse(input.rawBody);
-      } catch {
-        throw new TRPCError({ code: "BAD_REQUEST", message: "Malformed webhook body" });
-      }
-      const reference = event.data?.reference;
-      if (!reference) return { ok: true, ignored: true };
-      const record = await q.getPaymentByReference(reference);
+      const provider = activeProvider();
+      const event = await provider.parseWebhook(input.rawBody, {
+        "x-paystack-signature": input.signature ?? undefined,
+      });
+      if (!event) throw new TRPCError({ code: "UNAUTHORIZED", message: "Invalid webhook signature." });
+      if (!event.reference) return { ok: true, ignored: true };
+
+      const record = await q.getPaymentByReference(event.reference);
       if (!record) return { ok: true, ignored: true };
+
       if (event.event === "charge.success") {
         // Re-verify independently — never trust the event body alone.
-        const result = await paystack.verify(reference);
-        if (result.status === "success") {
-          await q.markPaymentVerified(reference, String(result.id ?? ""));
-          await q.createNotification(record.businessId, { type: "PAYMENT", title: "Payment successful", message: `Reference ${reference}`, link: "/app/finance" });
-        }
-      } else if (event.event === "charge.failed") {
-        await q.markPaymentFailed(reference);
-        await q.createNotification(record.businessId, { type: "PAYMENT_FAILED", title: "Payment failed", message: `Reference ${reference}`, link: "/app/finance" });
+        const result = await provider.verify(event.reference);
+        const outcome = await fulfilPayment(event.reference, result);
+        return { ok: true, outcome: outcome.outcome };
       }
-      return { ok: true };
+      if (event.event === "charge.failed") {
+        await q.markPaymentFailed(event.reference, "Provider reported a failed charge.");
+        return { ok: true, outcome: "failed" };
+      }
+      return { ok: true, ignored: true };
     }),
 });
 
@@ -770,11 +854,22 @@ const subscriptionRouter = router({
     await assertMember(ctx.user.id, input.businessId);
     return q.getSubscription(input.businessId);
   }),
+  /**
+   * Move to the FREE plan directly (a downgrade needs no payment). Upgrading to
+   * a paid plan goes through `payment.initialize` — the amount is never taken
+   * from the client.
+   */
   change: protectedProcedure
-    .input(bizInput.extend({ plan: z.enum(["FREE", "STARTER", "BUSINESS", "ENTERPRISE"]), billingPeriod: z.enum(["MONTHLY", "ANNUAL"]).default("MONTHLY"), amount: z.number().int().min(0) }))
+    .input(bizInput.extend({ plan: z.enum(["FREE", "STARTER", "BUSINESS", "ENTERPRISE"]), billingPeriod: z.enum(["MONTHLY", "ANNUAL"]).default("MONTHLY") }))
     .mutation(async ({ ctx, input }) => {
       await assertOwnerOrAdmin(ctx.user.id, input.businessId);
-      const row = await q.setSubscription(input.businessId, { plan: input.plan, billingPeriod: input.billingPeriod, amount: input.amount });
+      if (!planIsFree(input.plan)) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "Paid plans are activated by completing payment. Start the payment from Settings → Subscription.",
+        });
+      }
+      const row = await q.setSubscription(input.businessId, { plan: input.plan, billingPeriod: input.billingPeriod, amount: 0 });
       await q.logAudit(input.businessId, ctx.user.id, "SUBSCRIPTION_CHANGED", "subscription", row.id, { plan: input.plan });
       return row;
     }),
@@ -792,23 +887,41 @@ const supportRouter = router({
 
 // ── Platform admin (super admin) ─────────────────────────────────────────────
 const adminRouter = router({
-  stats: adminProcedure.query(() => q.platformStats()),
-  businesses: adminProcedure.query(() => q.listAllBusinesses()),
-  users: adminProcedure.query(() => q.listAllUsers()),
-  subscriptions: adminProcedure.query(() => q.listAllSubscriptions()),
-  payments: adminProcedure.query(() => q.listAllPayments()),
-  auditLogs: adminProcedure.query(() => q.listAllAuditLogs()),
-  support: adminProcedure.query(() => q.listSupportRequests()),
-  settings: adminProcedure.query(() => q.getPlatformSettings()),
-  setBusinessStatus: adminProcedure
+  stats: platformAdminProcedure.query(() => q.platformStats()),
+  businesses: platformAdminProcedure.query(() => q.listAllBusinesses()),
+  users: platformAdminProcedure.query(() => q.listAllUsers()),
+  subscriptions: platformAdminProcedure.query(() => q.listAllSubscriptions()),
+  payments: platformAdminProcedure.query(() => q.listAllPayments()),
+  auditLogs: platformAdminProcedure.query(() => q.listAllAuditLogs()),
+  support: platformAdminProcedure.query(() => q.listSupportRequests()),
+  settings: platformAdminProcedure.query(() => q.getPlatformSettings()),
+  setBusinessStatus: platformAdminProcedure
     .input(z.object({ businessId: z.uuid(), status: z.enum(["ACTIVE", "SUSPENDED", "TRIAL"]) }))
     .mutation(({ input }) => q.setBusinessStatus(input.businessId, input.status)),
-  updateSupportStatus: adminProcedure
+  updateSupportStatus: platformAdminProcedure
     .input(z.object({ id: z.uuid(), status: z.enum(["OPEN", "IN_PROGRESS", "CLOSED"]) }))
     .mutation(({ input }) => q.updateSupportStatus(input.id, input.status)),
-  setSetting: adminProcedure
+  setSetting: platformAdminProcedure
     .input(z.object({ key: z.string().min(1), value: z.string() }))
     .mutation(({ input }) => q.setPlatformSetting(input.key, input.value)),
+});
+
+// ── Platform administration (super admin) ────────────────────────────────────
+// Separate from business dashboards. Every procedure is gated by
+// platformAdminProcedure, which re-reads the role from the database.
+const platformRouter = router({
+  me: platformAdminProcedure.query(async ({ ctx }) => {
+    const admin = await q.getPlatformAdminByUserId(ctx.user.id);
+    return {
+      user: ctx.user,
+      phone: admin?.phone ?? null,
+      title: admin?.title ?? "Platform Administrator",
+      isPlatformOwner: admin?.isPlatformOwner ?? false,
+      mustChangePassword: admin?.mustChangePassword ?? false,
+      lastPasswordChangeAt: admin?.lastPasswordChangeAt ?? null,
+    };
+  }),
+  admins: platformAdminProcedure.query(() => q.listPlatformAdmins()),
 });
 
 // ── Files (uploads) ──────────────────────────────────────────────────────────
@@ -880,6 +993,7 @@ export const appRouter = router({
   subscription: subscriptionRouter,
   support: supportRouter,
   admin: adminRouter,
+  platform: platformRouter,
   files: filesRouter,
 });
 
