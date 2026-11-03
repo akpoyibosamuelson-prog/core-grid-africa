@@ -121,6 +121,12 @@ export default function AppLayout({ children }: { children: ReactNode }) {
             <Menu className="h-5 w-5" />
           </button>
 
+          {/* The sidebar carries the logo on desktop; on mobile it is hidden, so
+              the top bar shows the mark instead. */}
+          <Link to="/app" className="lg:hidden" aria-label="Core Grid Africa">
+            <LogoMark className="h-8 w-8" />
+          </Link>
+
           <div className="relative hidden max-w-xs flex-1 md:block">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <input

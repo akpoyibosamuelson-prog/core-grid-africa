@@ -2,32 +2,39 @@ import { cn } from "@/lib/utils";
 
 /**
  * CORE GRID AFRICA logo mark.
- * A "grid" of connected nodes — digital infrastructure for growing businesses.
- * Rendered as inline SVG so it scales crisply and needs no asset pipeline.
+ *
+ * The mark is the client's supplied emblem (Africa + bar chart + growth arrow),
+ * served from /logo-mark.png. The source artwork is a JPEG on a solid white
+ * background, so it is presented inside a white rounded tile rather than being
+ * knocked out: the emblem's own dark ring would otherwise disappear against the
+ * navy header. The tile keeps it crisp and legible on BOTH the dark navy and
+ * the light grey surfaces, and `object-contain` + inner padding means it is
+ * never stretched or cropped at small sizes.
  */
-export function LogoMark({ className, variant = "default" }: { className?: string; variant?: "default" | "light" }) {
-  const navy = variant === "light" ? "#FFFFFF" : "#0A1F44";
-  const royal = variant === "light" ? "#8FB0FF" : "#1E4FD8";
+export function LogoMark({
+  className,
+  variant = "default",
+}: {
+  className?: string;
+  variant?: "default" | "light";
+}) {
   return (
-    <svg viewBox="0 0 40 40" className={cn("h-9 w-9", className)} role="img" aria-label="Core Grid Africa">
-      <rect x="1" y="1" width="38" height="38" rx="10" fill={navy} />
-      {/* grid lines */}
-      <g stroke={royal} strokeWidth="1.4" opacity="0.55">
-        <line x1="13" y1="8" x2="13" y2="32" />
-        <line x1="27" y1="8" x2="27" y2="32" />
-        <line x1="8" y1="13" x2="32" y2="13" />
-        <line x1="8" y1="27" x2="32" y2="27" />
-      </g>
-      {/* connected nodes */}
-      <g fill="#FFFFFF">
-        <circle cx="13" cy="13" r="3.1" />
-        <circle cx="27" cy="13" r="3.1" />
-        <circle cx="13" cy="27" r="3.1" />
-        <circle cx="27" cy="27" r="3.1" />
-      </g>
-      <circle cx="20" cy="20" r="4.2" fill={royal} />
-      <circle cx="20" cy="20" r="1.7" fill="#FFFFFF" />
-    </svg>
+    <span
+      className={cn(
+        "inline-flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-white shadow-sm",
+        variant === "light" ? "ring-1 ring-white/25" : "ring-1 ring-black/5",
+        className,
+      )}
+    >
+      <img
+        src="/logo-mark.png"
+        alt="Core Grid Africa"
+        width={512}
+        height={512}
+        decoding="async"
+        className="h-full w-full object-contain p-[7%]"
+      />
+    </span>
   );
 }
 
