@@ -21,8 +21,11 @@ export function LogoMark({
   return (
     <span
       className={cn(
-        "inline-flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-white shadow-sm",
-        variant === "light" ? "ring-1 ring-white/25" : "ring-1 ring-black/5",
+        // A circular white badge, not a square tile: the emblem is itself round,
+        // so a disc reads as a deliberate logo badge on the navy sidebar/footer
+        // instead of a raw white rectangle pasted onto a dark surface.
+        "inline-flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-white shadow-sm",
+        variant === "light" ? "ring-1 ring-white/30" : "ring-1 ring-black/5",
         className,
       )}
     >
